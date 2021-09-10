@@ -222,22 +222,22 @@ class MultivariateNormalPriorHyperCube(object):
 
 class CustomPriorHyperCube(object):
 
-    def __init__(self, weight_function, param_names, param_ranges, nbins, kwargs_weight_function={}):
+    def __init__(self, chi_square_function, param_names, param_ranges, nbins, kwargs_weight_function={}):
 
         """
         Used to multiply by a new prior
-        :param kwargs_weight_function: a function that computes sample weights given an array of samples
+        :param chi_square_function: a function that computes the chi_square value from an array of samples
+        :param param_names: the parameter names
         :param param_ranges: the sampling ranges for each parameter
         :param nbins: the number of histogram/kde bins
         :param kwargs_weight_function: keyword arguments for the weight function
         """
-        N = 1000000 * len(param_names)
+        N = 3000000 * len(param_names)
         shape = (N, len(param_names))
         samples = np.empty(shape)
         for i, param in enumerate(param_names):
             samples[:, i] = np.random.uniform(param_ranges[i][0], param_ranges[i][1], N)
-        chi2 = weight_function(samples, **kwargs_weight_function)
-        weights = np.exp(-0.5 * chi2)
+        weights = np.exp(-0.5 * chi_square_function(samples, **kwargs_weight_function))
         self.param_names = param_names
         self.param_ranges = param_ranges
         self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0].T

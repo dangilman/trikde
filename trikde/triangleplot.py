@@ -512,7 +512,7 @@ class TrianglePlot(object):
 
         self._auto_scale.append(autoscale)
 
-    def _confidence_int(self, pmin, pmax, centers, heights, num_sigma):
+    def _confidence_int(self, pmin, pmax, centers, heights, num_sigma, thresh=None):
 
         centers = np.array(centers)
         heights = np.array(heights)
@@ -532,7 +532,7 @@ class TrianglePlot(object):
             if prob >= u:
                 samples.append(samp)
         #print('num sigma:', num_sigma)
-        mu, sigmas = compute_confidence_intervals(samples, num_sigma)
+        mu, sigmas = compute_confidence_intervals(samples, num_sigma, thresh)
 
         return mu, [mu-sigmas[0], mu+sigmas[1]]
 
@@ -642,14 +642,20 @@ class TrianglePlot(object):
 
     def get_parameter_confidence_interval(self, parameter, clevel, chain_num=None,
                                           show_percentage=False, return_intervals=False,
-                                          print_intervals=True):
+                                          print_intervals=True, thresh=None):
 
         if print_intervals:
             print('parameter name: ', parameter)
-            if show_percentage:
-                print('68% confidence intervals: \nformat: median (lower, upper) (-%, +%)\n')
+            if thresh is None:
+                if show_percentage:
+                    print('68% confidence intervals: \nformat: median (lower, upper) (-%, +%)\n')
+                else:
+                    print('68% confidence intervals: \nformat: median (lower, upper) (param_min, param_max)\n')
             else:
-                print('68% confidence intervals: \nformat: median (lower, upper)\n')
+                if show_percentage:
+                    print(str(100 * thresh) + '% confidence intervals: \nformat: median (lower, upper) (-%, +%)\n')
+                else:
+                    print(str(100 * thresh) + '% confidence intervals: \nformat: median (lower, upper)\n')
 
         medians, uppers, lowers = [], [], []
 
@@ -665,26 +671,17 @@ class TrianglePlot(object):
             coords = np.linspace(pmin, pmax, len(samples))
             bar_centers, bar_widths, bar_heights = self._bar_plot_heights(samples, coords, None)
 
-            median, [lower, upper] = self._confidence_int(pmin, pmax, bar_centers, bar_heights, clevel)
-
-            down = np.round(lower - median, 3)
-            up = np.round(upper - median, 3)
-            downp = np.round(down*100/median, 2)
-            upp = np.round(up*100/median, 2)
+            median, [lower, upper] = self._confidence_int(pmin, pmax, bar_centers, bar_heights, clevel, thresh)
 
             #chain.append({''})
 
             if print_intervals:
                 print('SAMPLES ' + str(idx + 1) + ':')
                 if show_percentage:
-                    print(
-                        str(median) + ' (' + str(lower) + ', ' + str(upper) + ')' + ' (' + str(down) + ', ' + str(
-                            up) + ') ' + '('+ str(downp) + '%, ' + str(upp) + '%) ')
+                    print(str(median) + ' (' + str(lower) + ', ' + str(upper) + ')')
                 else:
-                    print(str(median) + ' ('+str(lower)+', '+str(upper)+')' + ' ('+str(down)+', '+str(up)+')')
-                print('width: '+str(upper - lower))
-                print('\n')
-
+                    print(str(median) + ' ('+str(lower)+', '+str(upper)+')')
+                print('width: ', upper - lower)
             medians.append(median)
             uppers.append(upper)
             lowers.append(lower)
@@ -757,28 +754,37 @@ def compute_confidence_intervals_histogram(sample, num_sigma):
         lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
         return median, [median-lower_sigma2, upper_sigma2-median]
 
-def compute_confidence_intervals(sample, num_sigma):
+def compute_confidence_intervals(sample, num_sigma, thresh=None):
     """
     computes the upper and lower sigma from the median value.
     This functions gives good error estimates for skewed pdf's
     :param sample: 1-D sample
     :return: median, lower_sigma, upper_sigma
     """
-    if num_sigma > 3:
+    if thresh is not None and num_sigma > 3:
         raise ValueError("Number of sigma-constraints restricted to three. %s not valid" % num_sigma)
     num = len(sample)
     median = np.median(sample)
     sorted_sample = np.sort(sample)
 
-    num_threshold1 = int(round((num-1)*0.841345))
-    num_threshold2 = int(round((num-1)*0.977249868))
-    num_threshold3 = int(round((num-1)*0.998650102))
+    if thresh is None:
+        num_threshold1 = int(round((num-1)*0.841345))
+        num_threshold2 = int(round((num-1)*0.977249868))
+        num_threshold3 = int(round((num-1)*0.998650102))
 
-    if num_sigma == 1:
-        upper_sigma1 = sorted_sample[num_threshold1 - 1]
-        lower_sigma1 = sorted_sample[num - num_threshold1 - 1]
-        return median, [median-lower_sigma1, upper_sigma1-median]
-    if num_sigma == 2:
-        upper_sigma2 = sorted_sample[num_threshold2 - 1]
-        lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
-        return median, [median-lower_sigma2, upper_sigma2-median]
+        if num_sigma == 1:
+            upper_sigma1 = sorted_sample[num_threshold1 - 1]
+            lower_sigma1 = sorted_sample[num - num_threshold1 - 1]
+            return median, [median-lower_sigma1, upper_sigma1-median]
+        if num_sigma == 2:
+            upper_sigma2 = sorted_sample[num_threshold2 - 1]
+            lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
+            return median, [median-lower_sigma2, upper_sigma2-median]
+    else:
+
+        assert thresh <= 1
+        thresh = (1 + thresh)/2
+        num_threshold = int(round((num-1) * thresh))
+        upper = sorted_sample[num_threshold - 1]
+        lower = sorted_sample[num - num_threshold - 1]
+        return median, [median - lower, upper - median]
