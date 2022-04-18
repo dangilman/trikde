@@ -8,11 +8,11 @@ from scipy.interpolate import interp1d
 class TrianglePlot(object):
 
     _default_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
-                               (colors.cnames['dodgerblue'], colors.cnames['blue'], 'k'),
-                               (colors.cnames['orchid'], colors.cnames['darkviolet'], 'k'),
+                               (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
+                               (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
                                (colors.cnames['lightcoral'], colors.cnames['red'], 'k')]
 
-    truth_color = 'g'
+    truth_color = 'dodgerblue'
     spacing = np.array([0.1, 0.1, 0.05, 0.05, 0.2, 0.11])
     spacing_scale = 1.
     _tick_rotation = 0
@@ -90,9 +90,9 @@ class TrianglePlot(object):
                      axis_label_font=16, tick_label_font=12,
                      xtick_label_rotate=0, show_contours=True,
                      marginal_alpha=0.6, show_intervals=True,
-                     display_params=None):
+                     display_params=None, figure=1):
 
-        self.fig = plt.figure(1)
+        self.fig = plt.figure(figure)
 
         self._init(fig_size)
 
