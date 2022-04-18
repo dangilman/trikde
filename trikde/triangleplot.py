@@ -10,7 +10,7 @@ class TrianglePlot(object):
     _default_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
                                (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
                                (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
-                               (colors.cnames['lightcoral'], colors.cnames['red'], 'k')]
+                               (colors.cnames['navajowhite'], colors.cnames['darkorange'], 'k')]
 
     truth_color = 'dodgerblue'
     spacing = np.array([0.1, 0.1, 0.05, 0.05, 0.2, 0.11])
