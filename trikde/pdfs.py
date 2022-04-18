@@ -15,7 +15,7 @@ class GaussianWeight(object):
         norm = np.max(w)
         return w/norm
 
-class IndepdendentLikelihoods(object):
+class IndependentLikelihoods(object):
 
     def __init__(self, density_samples_list):
 
