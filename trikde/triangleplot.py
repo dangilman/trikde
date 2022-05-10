@@ -47,7 +47,7 @@ class TrianglePlot(object):
                 self._prange_list.append(self.parameter_ranges[pi])
 
         self._NDdensity_list = independent_likelihoods_list
-
+        
         self.set_cmap(cmap)
 
     def _load_projection_1D(self, pname, idx):
@@ -77,12 +77,14 @@ class TrianglePlot(object):
         if contour_colors is None:
             contour_colors = self._default_contour_colors
 
+        ims = []
         for i in range(self._nchains):
-            axes = self._make_joint_i(p1, p2, ax, i, contour_colors=contour_colors, levels=levels,
+            axes, im = self._make_joint_i(p1, p2, ax, i, contour_colors=contour_colors, levels=levels,
                       filled_contours=filled_contours, contour_alpha=contour_alpha,
                       labsize=15*label_scale, tick_label_font=tick_label_font,
                                xtick_label_rotate=xtick_label_rotate, show_contours=show_contours)
-        return axes
+            ims.append(im)
+        return axes, ims
 
     def make_triplot(self, contour_levels=[0.05, 0.22, 1],
                      filled_contours=True, contour_alpha=0.6,
@@ -145,7 +147,7 @@ class TrianglePlot(object):
                       filled_contours=True, contour_alpha=0.6, param_names=None,
                       fig_size=8, truths=None, load_from_file=True,
                       transpose_idx=None, bandwidth_scale=0.7, label_scale=1,
-                      cmap=None, xticklabel_rotate=0, bar_alpha=0.7, bar_colors=['k','m','g','r'],
+                      cmap=None, xticklabel_rotate=0, bar_alpha=0.7, bar_colors=['k','b','m','r'],
                       height_scale=1.1, show_low=False, show_high=False):
 
         self.fig = plt.figure(1)
@@ -270,7 +272,7 @@ class TrianglePlot(object):
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
 
-            ax.imshow(density, extent=extent, aspect=aspect,
+            im = ax.imshow(density, extent=extent, aspect=aspect,
                       origin='lower', cmap=self.cmap, alpha=0)
             self._contours(coordsx, coordsy, density, ax, extent=extent,
                            contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
@@ -281,7 +283,7 @@ class TrianglePlot(object):
         else:
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
-            ax.imshow(density, origin='lower', cmap=self.cmap, alpha=1, vmin=0,
+            im = ax.imshow(density, origin='lower', cmap=self.cmap, alpha=1, vmin=0,
                       vmax=np.max(density), aspect=aspect, extent=extent)
             if show_contours:
                 self._contours(coordsx, coordsy, density, ax, extent=extent, filled_contours=False,
@@ -304,7 +306,7 @@ class TrianglePlot(object):
             ax.set_xlabel(xlabel, fontsize=labsize)
             ax.set_ylabel(ylabel, fontsize=labsize)
 
-        return ax
+        return ax, im
 
     def _make_triplot_i(self, axes, color_index, contour_colors=None, levels=[0.05, 0.22, 1],
                         filled_contours=True, contour_alpha=0.6, fig_size=8,
@@ -382,9 +384,10 @@ class TrianglePlot(object):
                     if filled_contours:
                         coordsx = np.linspace(extent[0], extent[1], density.shape[0])
                         coordsy = np.linspace(extent[2], extent[3], density.shape[1])
-
+                        
+                        vmax = np.max(density)
                         axes[plot_index].imshow(density.T, extent=extent, aspect=aspect,
-                                                origin='lower', cmap=self.cmap, alpha=0)
+                                                origin='lower', cmap=self.cmap, alpha=0, vmin=0, vmax=vmax)
                         self._contours(coordsx, coordsy, density.T, axes[plot_index], extent=extent,
                                        contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
                                        levels=levels)
@@ -392,8 +395,10 @@ class TrianglePlot(object):
                         axes[plot_index].set_ylim(pmin2, pmax2)
 
                     else:
+
+                        vmax = np.max(density)
                         axes[plot_index].imshow(density.T, origin='lower', cmap=self.cmap, alpha=1, vmin=0,
-                                                vmax=np.max(density), aspect=aspect, extent=extent)
+                                                vmax=vmax, aspect=aspect, extent=extent)
 
                         if show_contours:
                             coordsx = np.linspace(extent[0], extent[1], density.shape[0])

@@ -29,7 +29,8 @@ class KDE(object):
         """
         return 1.05 * n ** (-1. / (d + 4))
 
-    def _gaussian_kernel(self, inverse_cov_matrix, coords_centered, dimension, n_reshape):
+    @staticmethod
+    def _gaussian_kernel(inverse_cov_matrix, coords_centered, dimension, n_reshape):
 
         """
         Computes the multivariate gaussian KDE from the covariance matrix and observation array
@@ -128,9 +129,28 @@ class KDE(object):
 
         # renormalize the boundary to remove bias
         if boundary_order == 1:
-            boundary_kernel = np.ones(np.shape(H))
-            boundary_normalization = fftconvolve(gaussian_kernel, boundary_kernel, mode='same')
 
-            density *= boundary_normalization ** -1
+            #boundary_kernel = np.ones(np.shape(H))
+            #boundary_normalization = fftconvolve(gaussian_kernel, boundary_kernel, mode='same')
+            #density *= boundary_normalization ** -1
+            edge_kernel = BoundaryCorrection(gaussian_kernel)
+            renormalization = edge_kernel.first_order_correction
+            density *= renormalization ** -1
 
         return density
+
+class BoundaryCorrection(object):
+
+    """
+    Basically the same as a Gaussian KDE, except the convolution is with a prior instead of a Gaussian
+    """
+    def __init__(self, pdf):
+
+        self._pdf = pdf
+        self._boundary_kernel = np.ones(np.shape(pdf))
+
+    @property
+    def first_order_correction(self):
+
+        boundary_normalization = fftconvolve(self._pdf, self._boundary_kernel, mode='same')
+        return boundary_normalization
