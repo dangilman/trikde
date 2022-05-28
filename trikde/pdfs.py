@@ -107,8 +107,9 @@ class GaussianWeight(object):
         w = np.exp(exponent)
         norm = np.max(w)
         return w/norm
+    
 
-class IndepdendentLikelihoods(object):
+class IndependentLikelihoods(object):
 
     def __init__(self, density_samples_list):
 
@@ -200,6 +201,8 @@ class IndepdendentLikelihoods(object):
         for den in self.densities:
             proj *= den.projection_2D(p1, p2)
         return proj * np.max(proj) ** -1
+ 
+IndepdendentLikelihoods = IndependentLikelihoods #alias for backwards compatibility
 
 class SingleDensity(object):
 
