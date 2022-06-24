@@ -13,6 +13,13 @@ class TrianglePlot(object):
                                (colors.cnames['lightcoral'], colors.cnames['red'], 'k')]
 
     truth_color = 'g'
+
+
+    _highc_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
+                               (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
+                               (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
+                               (colors.cnames['navajowhite'], colors.cnames['darkorange'], 'k')]
+
     spacing = np.array([0.1, 0.1, 0.05, 0.05, 0.2, 0.11])
     spacing_scale = 1.
     _tick_rotation = 0
@@ -76,6 +83,8 @@ class TrianglePlot(object):
 
         if contour_colors is None:
             contour_colors = self._default_contour_colors
+        if contour_colors == 'HighContrast':
+            contour_colors = self._highc_contour_colors
 
         ims = []
         for i in range(self._nchains):
@@ -92,9 +101,9 @@ class TrianglePlot(object):
                      axis_label_font=16, tick_label_font=12,
                      xtick_label_rotate=0, show_contours=True,
                      marginal_alpha=0.6, show_intervals=True,
-                     display_params=None):
+                     display_params=None, figure=1):
 
-        self.fig = plt.figure(1)
+        self.fig = plt.figure(figure)
 
         self._init(fig_size)
 
@@ -114,6 +123,8 @@ class TrianglePlot(object):
 
         if contour_colors is None:
             contour_colors = self._default_contour_colors
+        if contour_colors == 'HighContrast':
+            contour_colors = self._highc_contour_colors
         self._auto_scale = []
 
         for i in range(self._nchains):
@@ -157,6 +168,8 @@ class TrianglePlot(object):
 
         if contour_colors is None:
             contour_colors = self._default_contour_colors
+        if contour_colors == 'HighContrast':
+            contour_colors = self._highc_contour_colors
         self._auto_scale = []
         for i in range(self._nchains):
             out = self._make_marginal_i(p1, ax, i, contour_colors, levels, filled_contours, contour_alpha, param_names,
@@ -184,7 +197,8 @@ class TrianglePlot(object):
                          load_from_file=True, transpose_idx=None,
                          bandwidth_scale=0.7, label_scale=None, cmap=None, xticklabel_rotate=0,
                          bar_alpha=0.7, bar_color=None, show_low=False, show_high=False):
-
+        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
+            self.truth_color = 'dodgerblue'
         autoscale = []
 
         density = self._load_projection_1D(p1, color_index)
@@ -239,7 +253,6 @@ class TrianglePlot(object):
             ax.set_xlabel(xlabel, fontsize=labsize * label_scale)
 
         if truths is not None:
-
             t = deepcopy(truths[p1])
 
             if isinstance(t, float) or isinstance(t, int):
@@ -314,7 +327,8 @@ class TrianglePlot(object):
                         axis_label_font=None, cmap=None,
                         show_contours=True, marginal_alpha=0.9, show_intervals=True,
                         display_params=None):
-
+        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
+            self.truth_color = 'dodgerblue'
         size_scale = len(display_params) * 0.1 + 1
         self.fig.set_size_inches(fig_size * size_scale, fig_size * size_scale)
 
@@ -491,7 +505,6 @@ class TrianglePlot(object):
                         axes[plot_index].set_xlabel(xlabel, fontsize=axis_label_font)
 
                     if truths is not None:
-
                         t = deepcopy(truths[display_params[col]])
                         pmin, pmax = self._get_param_minmax(display_params[col])
                         if isinstance(t, float) or isinstance(t, int):
