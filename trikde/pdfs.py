@@ -321,7 +321,7 @@ class MultivariateNormalPriorHyperCube(object):
 class CustomPriorHyperCube(object):
 
     def __init__(self, chi_square_function, param_names, param_ranges, nbins, kwargs_weight_function={},
-                 renormalize=False, N_saamples_per_dim=3000000):
+                 renormalize=False, N_samples_per_dim=3000000):
 
         """
         Used to multiply by a new prior
@@ -332,7 +332,7 @@ class CustomPriorHyperCube(object):
         :param kwargs_weight_function: keyword arguments for the weight function
         :param renormalize: apply a reweighting to remove possible edge effects
         """
-        N = N_saamples_per_dim * len(param_names)
+        N = N_samples_per_dim * len(param_names)
         shape = (N, len(param_names))
         samples = np.empty(shape)
         for i, param in enumerate(param_names):

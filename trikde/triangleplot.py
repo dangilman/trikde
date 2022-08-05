@@ -75,7 +75,8 @@ class TrianglePlot(object):
     def make_joint(self, p1, p2, contour_colors=None, levels=[0.05, 0.22, 1],
                    filled_contours=True, contour_alpha=0.6,
                    fig_size=8, label_scale=1, tick_label_font=12,
-                     xtick_label_rotate=0, show_contours=True):
+                     xtick_label_rotate=0, show_contours=True,norm=None,
+                   logscale=False,vmin=None,vmax=None):
 
         self.fig = plt.figure(1)
         self._init(fig_size)
@@ -91,7 +92,9 @@ class TrianglePlot(object):
             axes, im = self._make_joint_i(p1, p2, ax, i, contour_colors=contour_colors, levels=levels,
                       filled_contours=filled_contours, contour_alpha=contour_alpha,
                       labsize=15*label_scale, tick_label_font=tick_label_font,
-                               xtick_label_rotate=xtick_label_rotate, show_contours=show_contours)
+                               xtick_label_rotate=xtick_label_rotate,
+                                          show_contours=show_contours,
+                                          norm=norm,logscale=logscale,vmin=vmin,vmax=vmax)
             ims.append(im)
         return axes, ims
 
@@ -270,7 +273,8 @@ class TrianglePlot(object):
 
     def _make_joint_i(self, p1, p2, ax, color_index, contour_colors=None, levels=[0.05, 0.22, 1],
                       filled_contours=True, contour_alpha=0.6, labsize=None, tick_label_font=None,
-                               xtick_label_rotate=None, show_contours=None):
+                               xtick_label_rotate=None, show_contours=None,
+                      norm=None,logscale=False,vmin=None,vmax=None):
 
         density = self._load_projection_2D(p1, p2, color_index)
 
@@ -282,11 +286,15 @@ class TrianglePlot(object):
         ytick_locs, ytick_labels, ylabel, _ = self.ticks_and_labels(p2)
 
         if filled_contours:
+            if logscale:
+                print('WARNING: you specified log_scale = True, but this has no effect when filled_contours=True')
+            if vmin is None or vmax is None:
+                print('WARNING: you specified vmin or vmax, but these arguments have no effect when filled_contours=True')
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
 
             im = ax.imshow(density, extent=extent, aspect=aspect,
-                      origin='lower', cmap=self.cmap, alpha=0)
+                      origin='lower', cmap=self.cmap, alpha=0, norm=norm)
             self._contours(coordsx, coordsy, density, ax, extent=extent,
                            contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
                            levels=levels)
@@ -294,10 +302,22 @@ class TrianglePlot(object):
             ax.set_ylim(pmin2, pmax2)
 
         else:
+            if logscale:
+                d = np.log10(density / np.max(density))
+                if vmin is None:
+                    vmin = -5.0
+                if vmax is None:
+                    vmax = 0.0
+            else:
+                d = density / np.max(density)
+                if vmin is None:
+                    vmin = np.min(d)
+                if vmax is None:
+                    vmax = 1.0
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
-            im = ax.imshow(density, origin='lower', cmap=self.cmap, alpha=1, vmin=0,
-                      vmax=np.max(density), aspect=aspect, extent=extent)
+            im = ax.imshow(d, origin='lower', cmap=self.cmap, alpha=1, vmin=vmin,
+                      vmax=vmax, aspect=aspect, extent=extent, norm=norm)
             if show_contours:
                 self._contours(coordsx, coordsy, density, ax, extent=extent, filled_contours=False,
                            contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
