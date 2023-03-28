@@ -3,7 +3,7 @@ from trikde.kde import KDE
 from trikde.kde import BoundaryCorrection
 from scipy.interpolate import RegularGridInterpolator
 import numpy as np
-
+from multiprocessing.pool import Pool
 
 class InterpolatedLikelihood(object):
     """
@@ -91,8 +91,106 @@ class InterpolatedLikelihood(object):
                     raise Exception('point was out of bounds: ', point)
 
         p = float(self.interp(point))
-
+        if p>1:
+            print('warning: p>1, possibly due to extrapolation')
         return min(1., max(p, 0.))
+
+    def call_at_points(self, point_list):
+
+        """
+        Evaluates the liklihood at a set of points in parameter space
+        :param point_list: a list of tuples at which to evaluate likelihood
+
+        Returns the likelihood
+        """
+        f = []
+        for point in point_list:
+            f.append(self(point))
+        return np.array(f)
+
+    def epsilon_correction_weight(self, point_evaluate_array, epsilon, n_sub_divisions=6,
+                       use_multiprocessing=True, nproc=6):
+        """
+        This method computes an importance weight by integrating the likelihood function over the non-zero tolerance
+        threshold epsilon impelemnted in a simple ABC rejection algorithm
+        :param point_evaluate_array: an array of points around which to integrate
+        :param epsilon: the tolerance threshold in ABC
+        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
+        :param use_multiprocessing: bool; use multiple processors
+        :param nproc: number of processors to use with multi-threading
+        :return:
+        """
+        if use_multiprocessing:
+            args_list = []
+            for j in range(0, point_evaluate_array.shape[0]):
+                args = (point_evaluate_array[j,:], epsilon, n_sub_divisions)
+                args_list.append(args)
+            pool = Pool(nproc)
+            w = pool.starmap(self._epsilon_correction_weight_single, args_list)
+            pool.close()
+
+        else:
+            w = []
+            for j in range(0, point_evaluate_array.shape[0]):
+                w.append(self._epsilon_correction_weight_single(point_evaluate_array[j,:],
+                                                                epsilon, n_sub_divisions))
+        return np.array(w)
+
+    def _epsilon_correction_weight_single(self, point_evaluate, epsilon, n_sub_divisions=6):
+        """
+        This method computes an importance weight by integrating the likelihood function over the non-zero tolerance
+        threshold epsilon impelemnted in a simple ABC rejection algorithm
+        :param point_evaluate: the point around which to integrate
+        :param epsilon: the tolerance threshold in ABC
+        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
+        :return:
+        """
+        exact_integral = self.integrate_rect(point_evaluate, epsilon, n_sub_divisions)
+        function_at_point = float(self(point_evaluate))
+        appox_integral = function_at_point * epsilon ** 3
+        return appox_integral / exact_integral
+
+    def integrate_rect(self, point, step, n_sub_divisions=25):
+        """
+        This method integrates the likelihood in a N-dimensional volume with integration bounds specified in an a
+        rectangular (or higher-dimension analog) space
+        :param point: the point around which to integrate
+        :param step: the step size (dx, dy, dz,...) that specfies lower and upper bounds relative to point
+        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
+        For example:
+        point = (0.0, 1.0, -2.0)
+        step = 1.0
+        will integrate over a cube centered at point from
+        -0.5 to 0.5, 0.5, to 1.5, -2.5 to -1.5
+        :return: the likelihood function integrated over dV
+        """
+        domain = []
+        ndim = len(point)
+        N = int(n_sub_divisions ** ndim)
+        for i in range(0, ndim):
+            lower = point[i] - step / 2
+            upper = point[i] + step / 2
+            span = np.linspace(lower, upper, n_sub_divisions)
+            domain.append(span)
+        point_combinations = []
+        if ndim == 3:
+            for i in range(0, n_sub_divisions):
+                for j in range(0, n_sub_divisions):
+                    for k in range(0, n_sub_divisions):
+                        x = (domain[0][i], domain[1][j], domain[2][k])
+                        point_combinations.append(x)
+        elif ndim == 2:
+            for i in range(0, n_sub_divisions):
+                for j in range(0, n_sub_divisions):
+                    x = (domain[0][i], domain[1][j])
+                    point_combinations.append(x)
+        f = []
+        # now evaluate the likelihod at each point
+        for i, xi in enumerate(point_combinations):
+            f.append(self(tuple(xi)))
+        f = self.call_at_points(point_combinations)
+        integral = np.sum(f) * step ** 3 / N
+        return integral
 
 class GaussianWeight(object):
 
