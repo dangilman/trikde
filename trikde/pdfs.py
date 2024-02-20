@@ -11,16 +11,15 @@ class InterpolatedLikelihood(object):
     """
     def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False):
 
-        prod = independent_densities.density.T
-        norm = np.max(prod)
-        self.density = prod / norm
+        #prod = independent_densities.density.T
+        #norm = np.max(prod)
+        #self.density = prod / norm
+        self.density = independent_densities.density.T
         self.param_names, self.param_ranges = param_names, param_ranges
-
-        nbins = np.shape(prod)[0]
+        nbins = np.shape(self.density)[0]
         points = []
         for ran in param_ranges:
             points.append(np.linspace(ran[0], ran[-1], nbins))
-
         if extrapolate:
             kwargs_interpolator = {'bounds_error': False, 'fill_value': None}
         else:
@@ -30,7 +29,7 @@ class InterpolatedLikelihood(object):
 
         self.interp = RegularGridInterpolator(points, self.density, **kwargs_interpolator)
 
-    def sample(self, n, nparams=None, pranges=None):
+    def sample(self, n, nparams=None, pranges=None, print_progress=True):
 
         """
         Generates n samples of the parameters in param_names from the likelihood through rejection sampling
@@ -57,7 +56,7 @@ class InterpolatedLikelihood(object):
             proposal = tuple(proposal)
             like = self(proposal)
             u = np.random.uniform(0, 1)
-            if like > u:
+            if like >= u:
                 samples[count, :] = proposal
                 count += 1
             if count == n:
@@ -65,9 +64,10 @@ class InterpolatedLikelihood(object):
 
             current_ratio = count/n
 
-            if count%readout == 0 and last_ratio != current_ratio:
-                print('sampling.... '+str(np.round(100*count/n, 2))+'%')
-                last_ratio = count/n
+            if print_progress:
+                if count%readout == 0 and last_ratio != current_ratio:
+                    print('sampling.... '+str(np.round(100*count/n, 2))+'%')
+                    last_ratio = count/n
 
         return samples
 
@@ -81,7 +81,6 @@ class InterpolatedLikelihood(object):
         Returns the likelihood
         """
         point = np.array(point)
-
         for i, value in enumerate(point):
             if value is None:
                 new_point = np.random.uniform(self.param_ranges[i][0], self.param_ranges[i][1])
@@ -108,90 +107,6 @@ class InterpolatedLikelihood(object):
             f.append(self(point))
         return np.array(f)
 
-    def epsilon_correction_weight(self, point_evaluate_array, epsilon, n_sub_divisions=6,
-                       use_multiprocessing=True, nproc=6):
-        """
-        This method computes an importance weight by integrating the likelihood function over the non-zero tolerance
-        threshold epsilon impelemnted in a simple ABC rejection algorithm
-        :param point_evaluate_array: an array of points around which to integrate
-        :param epsilon: the tolerance threshold in ABC
-        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
-        :param use_multiprocessing: bool; use multiple processors
-        :param nproc: number of processors to use with multi-threading
-        :return:
-        """
-        if use_multiprocessing:
-            args_list = []
-            for j in range(0, point_evaluate_array.shape[0]):
-                args = (point_evaluate_array[j,:], epsilon, n_sub_divisions)
-                args_list.append(args)
-            pool = Pool(nproc)
-            w = pool.starmap(self._epsilon_correction_weight_single, args_list)
-            pool.close()
-
-        else:
-            w = []
-            for j in range(0, point_evaluate_array.shape[0]):
-                w.append(self._epsilon_correction_weight_single(point_evaluate_array[j,:],
-                                                                epsilon, n_sub_divisions))
-        return np.array(w)
-
-    def _epsilon_correction_weight_single(self, point_evaluate, epsilon, n_sub_divisions=6):
-        """
-        This method computes an importance weight by integrating the likelihood function over the non-zero tolerance
-        threshold epsilon impelemnted in a simple ABC rejection algorithm
-        :param point_evaluate: the point around which to integrate
-        :param epsilon: the tolerance threshold in ABC
-        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
-        :return:
-        """
-        exact_integral = self.integrate_rect(point_evaluate, epsilon, n_sub_divisions)
-        function_at_point = float(self(point_evaluate))
-        appox_integral = function_at_point * epsilon ** 3
-        return appox_integral / exact_integral
-
-    def integrate_rect(self, point, step, n_sub_divisions=25):
-        """
-        This method integrates the likelihood in a N-dimensional volume with integration bounds specified in an a
-        rectangular (or higher-dimension analog) space
-        :param point: the point around which to integrate
-        :param step: the step size (dx, dy, dz,...) that specfies lower and upper bounds relative to point
-        :param n_sub_divisions: the number of discrete points at which to evaluate the integrand
-        For example:
-        point = (0.0, 1.0, -2.0)
-        step = 1.0
-        will integrate over a cube centered at point from
-        -0.5 to 0.5, 0.5, to 1.5, -2.5 to -1.5
-        :return: the likelihood function integrated over dV
-        """
-        domain = []
-        ndim = len(point)
-        N = int(n_sub_divisions ** ndim)
-        for i in range(0, ndim):
-            lower = point[i] - step / 2
-            upper = point[i] + step / 2
-            span = np.linspace(lower, upper, n_sub_divisions)
-            domain.append(span)
-        point_combinations = []
-        if ndim == 3:
-            for i in range(0, n_sub_divisions):
-                for j in range(0, n_sub_divisions):
-                    for k in range(0, n_sub_divisions):
-                        x = (domain[0][i], domain[1][j], domain[2][k])
-                        point_combinations.append(x)
-        elif ndim == 2:
-            for i in range(0, n_sub_divisions):
-                for j in range(0, n_sub_divisions):
-                    x = (domain[0][i], domain[1][j])
-                    point_combinations.append(x)
-        f = []
-        # now evaluate the likelihod at each point
-        for i, xi in enumerate(point_combinations):
-            f.append(self(tuple(xi)))
-        f = self.call_at_points(point_combinations)
-        integral = np.sum(f) * step ** 3 / N
-        return integral
-
 class GaussianWeight(object):
 
     def __init__(self, mean, sigma):
@@ -205,7 +120,7 @@ class GaussianWeight(object):
         w = np.exp(exponent)
         norm = np.max(w)
         return w/norm
-    
+
 
 class IndependentLikelihoods(object):
 
@@ -218,7 +133,6 @@ class IndependentLikelihoods(object):
         if not isinstance(density_samples_list, list):
             raise Exception('must pass in a list of DensitySamples instances.')
         self.densities = density_samples_list
-
         self.param_names = density_samples_list[0].param_names
         self.param_ranges = density_samples_list[0].param_ranges
 
@@ -228,9 +142,8 @@ class IndependentLikelihoods(object):
         if not hasattr(self, '_product'):
             prod = 1
             for di in self.densities:
-
-                prod *= di.averaged
-
+                prod *= di.density
+            prod /= np.max(prod)
             self._product = prod
 
         return self._product
@@ -266,103 +179,6 @@ class IndependentLikelihoods(object):
 
         if p1 not in self.param_names or p2 not in self.param_names:
             raise Exception(p1 + ' or ' + p2 + ' not in ' + str(self.param_names))
-        sum_inds = []
-        for i, name in enumerate(self.param_names):
-            if p1 != name and p2 != name:
-                sum_inds.append(len(self.param_names) - (i + 1))
-
-        tpose = False
-        for name in self.param_names:
-            if name == p1:
-                break
-            elif name == p2:
-                tpose = True
-                break
-
-        projection = np.sum(self.density, tuple(sum_inds))
-        if tpose:
-            projection = projection.T
-
-        return projection
-
-    def projection_1Dold(self, pname):
-
-        proj = 1
-        for den in self.densities:
-            proj *= den.projection_1D(pname)
-
-        return proj * np.max(proj) ** -1
-
-    def projection_2Dold(self, p1, p2):
-
-        proj = 1
-        for den in self.densities:
-            proj *= den.projection_2D(p1, p2)
-        return proj * np.max(proj) ** -1
- 
-IndepdendentLikelihoods = IndependentLikelihoods #alias for backwards compatibility
-
-class SingleDensity(object):
-
-    """
-    This class stores an N-dimensional probability density and optionally a KDE estimate of it
-    """
-
-    def __init__(self, data, param_names, param_ranges, weights, bandwidth_scale, nbins, kde):
-
-        """
-
-        :param data: numpy array of observations, shape = (n_observations, n_dimensions)
-        :param param_names: parameter names for each dimension
-        :param param_ranges: a list of parameter (min, max) values, e.g.
-        [[param1_min, param1_max], [param2_min, param2_max], ...]
-        :param weights: importance weights for each observation
-        :param bandwidth_scale: bandwidth scale, only applicable if using a Gaussian KDE
-        :param nbins: number of bins for the KDE or histogram
-        :param kde: bool; whether or not to use a Gaussian KDE estimator for the data
-        """
-
-        self.param_names = param_names
-        self.param_range_list = param_ranges
-
-        estimator = KDE(bandwidth_scale, nbins)
-
-        if kde:
-            self.density = estimator(data, param_ranges, weights)
-        else:
-            self.density = estimator.NDhistogram(data, weights, param_ranges)
-
-    def projection_1D(self, pname):
-
-        """
-        Returns the 1D marginal pdf of the parameter 'pname'
-        :param pname: parameter name
-        :return: 1D pdf
-        """
-
-        sum_inds = []
-
-        if pname not in self.param_names:
-            raise Exception('no param named '+pname)
-        for i, name in enumerate(self.param_names):
-            if pname != name:
-                sum_inds.append(len(self.param_names) - (i + 1))
-
-        projection = np.sum(self.density, tuple(sum_inds))
-
-        return projection
-
-    def projection_2D(self, p1, p2):
-
-        """
-        Returns the 2D marginal pdf of the parameters 'p1', 'p2'
-        :param p1: parameter name 1
-        :param p2: parameter name 2
-        :return: 2D pdf
-        """
-
-        if p1 not in self.param_names or p2 not in self.param_names:
-            raise Exception(p1 + ' or '+ p2 + ' not in '+str(self.param_names))
         sum_inds = []
         for i, name in enumerate(self.param_names):
             if p1 != name and p2 != name:
@@ -458,92 +274,160 @@ class DensitySamples(object):
     This class combins several instances of SingleDensity, that are combined by averaging
     """
 
-    def __init__(self, data_list, param_names, weight_list, param_ranges=None, bandwidth_scale=0.6,
+    def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
                  nbins=12, use_kde=False, samples_width_scale=3):
 
         """
 
-        :param data_list: a list of observations, each with shape = (n_observations, n_dimensions)
+        :param data: an array of observations, shape = (n_observations, n_dimensions)
         :param param_names: a list of parameter names
-        :param weight_list: a list of importance weights for each element of data_list, or "None"
+        :param weights: importance weights
         :param param_ranges: a list of parameter ranges; if not specified, the parameter ranges will be estimated from the first
         dataset in data_list
         :param bandwidth_scale: rescales the kernel bandwidth, only applicable for Gaussian KDE
         :param nbins: number of bins for histogram/KDE
-        :param use_kde: bool; whether or not to use a Gaussian KDE
+        :param use_kde: bool; use a Gaussian KDE
         :param samples_width_scale: used to estimate the parameter ranges, determines parameter ranges using
         samples_width_scale standard deviations of the 1st dataset; only relevant if param_ranges is not specified
         """
 
-        if not isinstance(data_list, list):
-            data_list = [data_list]
-        if weight_list is not None:
-            if not isinstance(weight_list, list):
-                weight_list = [weight_list]
-            assert len(weight_list) == len(data_list), 'length of importance sampling weights must equal ' \
-                                                       'length of data list'
+        estimator = KDE(bandwidth_scale, nbins)
+        if use_kde:
+            self.density = estimator(data, param_ranges, weights)
+        else:
+            self.density = estimator.NDhistogram(data, weights, param_ranges)
+        self.density /= np.max(self.density)
 
-        self.single_densities = []
-
-        self._n = 0
-
-        if weight_list is None:
-            weight_list = [None] * len(data_list)
-
-        self._first_data = data_list[0]
-        if self._first_data.shape[1] > self._first_data.shape[0]:
+        if data.shape[1] > data.shape[0]:
             raise Exception('you have specified samples that have more dimensions that data points, '
                             'this is probably not what you want to do. data_list should be a list of datasets with'
                             'size (n_observations, n_dimensions)')
         self._width_scale = samples_width_scale
 
         if param_ranges is None:
-            means = [np.mean(self._first_data[:, i]) for i in range(0, self._first_data.shape[1])]
-            widths = [np.std(self._first_data[:, i]) for i in range(0, self._first_data.shape[1])]
+            means = [np.mean(data[:, i]) for i in range(0, data.shape[1])]
+            widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
             self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
         else:
             self.param_ranges = param_ranges
-
+        self._data = data
+        self._weights = weights
         self.param_names = param_names
 
-        for j, (data, weights) in enumerate(zip(data_list, weight_list)):
-            self._n += 1
-            self.single_densities.append(SingleDensity(data, param_names, self.param_ranges, weights,
-                                                       bandwidth_scale, nbins, use_kde))
+    @property
+    def effective_sample_size(self):
+
+        sample_size = self._data.shape[0]
+        if self._weights is None:
+            effective_sample_size = self._data.shape[0]
+        else:
+            w = self._weights / np.max(self._weights)
+            effective_sample_size = np.sum(w)
+        print('actual sample size: ', sample_size)
+        print('effective sample size: ', effective_sample_size)
+        return
 
     def projection_1D(self, pname):
 
         """
-        Returns the 1D marginal pdf of the parameter 'pname' by averaging over each observation in data list
+        Returns the 1D marginal pdf of the parameter 'pname'
         :param pname: parameter name
-        :return: 1D averaged pdf
+        :return: 1D pdf
         """
-        proj = 0
-        for den in self.single_densities:
-            proj += den.projection_1D(pname)
-        return proj * np.max(proj) ** -1
+        sum_inds = []
+        if pname not in self.param_names:
+            raise Exception('no param named ' + pname)
+        for i, name in enumerate(self.param_names):
+            if pname != name:
+                sum_inds.append(len(self.param_names) - (i + 1))
+        projection = np.sum(self.density, tuple(sum_inds))
+        return projection
 
     def projection_2D(self, p1, p2):
 
         """
-        Returns the 2D marginal pdf of the parameters 'p1', 'p2' averaged over each observation in data list
+        Returns the 2D marginal pdf of the parameters 'p1', 'p2'
         :param p1: parameter name 1
         :param p2: parameter name 2
-        :return: 2D averaged pdf
+        :return: 2D pdf
         """
-        proj = 0
-        for den in self.single_densities:
-            proj += den.projection_2D(p1, p2)
-        return proj
 
-    @property
-    def averaged(self):
+        if p1 not in self.param_names or p2 not in self.param_names:
+            raise Exception(p1 + ' or ' + p2 + ' not in ' + str(self.param_names))
+        sum_inds = []
+        for i, name in enumerate(self.param_names):
+            if p1 != name and p2 != name:
+                sum_inds.append(len(self.param_names) - (i + 1))
+        tpose = False
+        for name in self.param_names:
+            if name == p1:
+                break
+            elif name == p2:
+                tpose = True
+                break
+        projection = np.sum(self.density, tuple(sum_inds))
+        if tpose:
+            projection = projection.T
+        return projection
 
-        """
-        Computes the average of each PDF in N-dimensions
-        :return: an array with shape (nbins, nbins)
-        """
-        avg = 0
-        for di in self.single_densities:
-            avg += di.density
-        return avg
+def likelihood_function_change(like1, like2, param_ranges, n_draw=50000, nbins=5):
+    """
+    This function evaluates the change or derivative between two two-dimensional likelihood functions
+
+    :param like1: the first likelihood
+    :param like2: the second likelihood
+    :param param_names: parameter names for each axis
+    :param param_ranges: axis ranges in each dimension
+    :param n_draw: the number of samples to draw from each likelihood to compute the derivative
+    :param nbins: the number of bins along each axis
+    :return: the relative difference in the likelihood functions, the likelihoods themselves, and the
+    total change per bin
+    """
+    from trikde.pdfs import InterpolatedLikelihood
+    param_names = ['param1', 'param2']
+    interp1 = InterpolatedLikelihood(like1, param_names, param_ranges)
+    interp2 = InterpolatedLikelihood(like2, param_names, param_ranges)
+    s1 = interp1.sample(n_draw)
+    s2 = interp2.sample(n_draw)
+    h1, _, _ = np.histogram2d(s1[:,0], s1[:,1], bins=nbins, range=(param_ranges[0], param_ranges[1]),density=True)
+    h2, _, _ = np.histogram2d(s2[:,0], s2[:,1], bins=nbins, range=(param_ranges[0], param_ranges[1]),density=True)
+    delta_h = h2 / h1 - 1
+    total_diff = np.sum(np.absolute(delta_h)) / nbins ** 2
+    return delta_h.T, h1.T, h2.T, total_diff
+
+def figure_of_merit(interp_likelihiood, n_draw=10000):
+    n = 0
+    for i in range(0, n_draw):
+        proposal = []
+        for ran in interp_likelihiood.param_ranges:
+            proposal.append(np.random.uniform(ran[0], ran[1]))
+        proposal = tuple(proposal)
+        like = interp_likelihiood(proposal)
+        u = np.random.rand()
+        if like > u:
+            n += 1
+    return n_draw/n
+
+def posterior_volume_ratio(interp_likelihood_1, interp_likelihood_2,n_draw=5000):
+
+    volume_1, volume_2 = 0, 0
+    assert interp_likelihood_1.param_ranges == interp_likelihood_2.param_ranges
+    for ran_1, ran_2 in zip(interp_likelihood_1.param_ranges, interp_likelihood_2.param_ranges):
+        assert ran_1[0] == ran_2[0]
+        assert ran_1[1] == ran_2[1]
+    for n in range(0, n_draw):
+        proposal = []
+        for ran in interp_likelihood_1.param_ranges:
+            proposal.append(np.random.uniform(ran[0], ran[1]))
+        proposal = tuple(proposal)
+        like_1 = interp_likelihood_1(proposal)
+        like_2 = interp_likelihood_2(proposal)
+        u = np.random.rand()
+        if like_1 > u:
+            volume_1 += 1
+        if like_2 > u:
+            volume_2 += 1
+    posterior_volume_relative_to_prior_1 = volume_1 / n_draw
+    posterior_volume_relative_to_prior_2 = volume_2 / n_draw
+    return posterior_volume_relative_to_prior_1/posterior_volume_relative_to_prior_2
+

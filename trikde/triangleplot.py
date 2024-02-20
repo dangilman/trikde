@@ -10,11 +10,11 @@ class TrianglePlot(object):
     _default_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
                                (colors.cnames['dodgerblue'], colors.cnames['blue'], 'k'),
                                (colors.cnames['orchid'], colors.cnames['darkviolet'], 'k'),
-                               (colors.cnames['lightcoral'], colors.cnames['red'], 'k')]
+                               (colors.cnames['lightcoral'], colors.cnames['red'], 'k'),
+                               (colors.cnames['orange'], colors.cnames['gold'], 'k')]
 
     truth_color = 'g'
-
-
+    truth_color_list = None
     _highc_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
                                (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
                                (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
@@ -256,16 +256,19 @@ class TrianglePlot(object):
             ax.set_xlabel(xlabel, fontsize=labsize * label_scale)
 
         if truths is not None:
-            t = deepcopy(truths[p1])
-
-            if isinstance(t, float) or isinstance(t, int):
-                pmin, pmax = self._get_param_minmax(p1)
-                if t <= pmin:
-                    t = pmin * 1.075
-
-                ax.axvline(t, linestyle='--', color=self.truth_color, linewidth=3)
-            elif isinstance(t, list):
-                ax.axvspan(t[0], t[1], alpha=0.25, color=self.truth_color)
+            if self.truth_color_list is None:
+                self.truth_color_list = [self.truth_color, 'y', 'b', 'g', '0.5']
+            if not isinstance(truths, list):
+                truths = [truths]
+            for idx_truth, truth in enumerate(truths):
+                t = deepcopy(truth[p1])
+                if isinstance(t, float) or isinstance(t, int):
+                    pmin, pmax = self._get_param_minmax(p1)
+                    if t <= pmin:
+                        t = pmin * 1.075
+                    ax.axvline(t, linestyle='--', color=self.truth_color_list[idx_truth], linewidth=3)
+                elif isinstance(t, list):
+                    ax.axvspan(t[0], t[1], alpha=0.25, color=self.truth_color_list[idx_truth])
 
         self._auto_scale.append(autoscale)
 
@@ -311,7 +314,8 @@ class TrianglePlot(object):
             else:
                 d = density / np.max(density)
                 if vmin is None:
-                    vmin = np.min(d)
+                    #vmin = np.min(d)
+                    vmin = 0.0
                 if vmax is None:
                     vmax = 1.0
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
@@ -347,6 +351,7 @@ class TrianglePlot(object):
                         axis_label_font=None, cmap=None,
                         show_contours=True, marginal_alpha=0.9, show_intervals=True,
                         display_params=None):
+
         if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
             self.truth_color = 'dodgerblue'
         size_scale = len(display_params) * 0.1 + 1
@@ -448,10 +453,21 @@ class TrianglePlot(object):
                     axes[plot_index].set_ylim(pmin2, pmax2)
 
                     if truths is not None:
-                        t1, t2 = truths[display_params[col]], truths[display_params[row]]
-                        axes[plot_index].scatter(t1, t2, color=self.truth_color, s=50)
-                        axes[plot_index].axvline(t1, linestyle='--', color=self.truth_color, linewidth=3)
-                        axes[plot_index].axhline(t2, linestyle='--', color=self.truth_color, linewidth=3)
+                        if isinstance(truths, dict):
+                            t1, t2 = truths[display_params[col]], truths[display_params[row]]
+                            axes[plot_index].scatter(t1, t2, color=self.truth_color, s=50)
+                            axes[plot_index].axvline(t1, linestyle='--', color=self.truth_color, linewidth=3)
+                            axes[plot_index].axhline(t2, linestyle='--', color=self.truth_color, linewidth=3)
+                        else:
+                            assert isinstance(truths, list), 'if specified, truths must be a dictionary or a ' \
+                                                             'list of dictionaries'
+                            if self.truth_color_list is None:
+                                self.truth_color_list = [self.truth_color, 'k', '0.6', '0.3']
+                            for truth_index in range(0, len(truths)):
+                                t1, t2 = truths[truth_index][display_params[col]], truths[truth_index][display_params[row]]
+                                axes[plot_index].scatter(t1, t2, color=self.truth_color_list[truth_index], s=50)
+                                axes[plot_index].axvline(t1, linestyle='--', color=self.truth_color_list[truth_index], linewidth=3)
+                                axes[plot_index].axhline(t2, linestyle='--', color=self.truth_color_list[truth_index], linewidth=3)
 
                 elif marg_in_row == col and marg_done is False:
 
@@ -525,19 +541,34 @@ class TrianglePlot(object):
                         axes[plot_index].set_xlabel(xlabel, fontsize=axis_label_font)
 
                     if truths is not None:
-                        t = deepcopy(truths[display_params[col]])
-                        pmin, pmax = self._get_param_minmax(display_params[col])
-                        if isinstance(t, float) or isinstance(t, int):
-                            if t <= pmin:
-                                t_ = pmin * 1.075
-                            else:
-                                t_ = t
-                            axes[plot_index].axvline(t_, linestyle='--', color=self.truth_color, linewidth=3)
-
-                        else:
-                            t_ = 0.5*(t[0] + t[1])
-                            axes[plot_index].axvline(t_, linestyle='--', color=self.truth_color, linewidth=3)
-                            axes[plot_index].axvspan(t[0], t[1], color=self.truth_color, alpha=0.25)
+                        if self.truth_color_list is None:
+                            self.truth_color_list = [self.truth_color, 'k', '0.6', '0.3']
+                        if not isinstance(truths, list):
+                            truths = [truths]
+                        for idx_truth, truth in enumerate(truths):
+                            t = deepcopy(truth[display_params[col]])
+                            if isinstance(t, float) or isinstance(t, int):
+                                pmin, pmax = self._get_param_minmax(display_params[col])
+                                if t <= pmin:
+                                    t = pmin * 1.075
+                                axes[plot_index].axvline(t, linestyle='--', color=self.truth_color_list[idx_truth], linewidth=3)
+                            elif isinstance(t, list):
+                                axes[plot_index].axvspan(t[0], t[1], alpha=0.25, color=self.truth_color_list[idx_truth])
+                    #
+                    # if truths is not None:
+                    #     t = deepcopy(truths[display_params[col]])
+                    #     pmin, pmax = self._get_param_minmax(display_params[col])
+                    #     if isinstance(t, float) or isinstance(t, int):
+                    #         if t <= pmin:
+                    #             t_ = pmin * 1.075
+                    #         else:
+                    #             t_ = t
+                    #         axes[plot_index].axvline(t_, linestyle='--', color=self.truth_color, linewidth=3)
+                    #
+                    #     else:
+                    #         t_ = 0.5*(t[0] + t[1])
+                    #         axes[plot_index].axvline(t_, linestyle='--', color=self.truth_color, linewidth=3)
+                    #         axes[plot_index].axvspan(t[0], t[1], color=self.truth_color, alpha=0.25)
 
                 else:
                     axes[plot_index].axis('off')
