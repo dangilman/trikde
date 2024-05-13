@@ -292,18 +292,10 @@ class DensitySamples(object):
         """
 
         estimator = KDE(bandwidth_scale, nbins)
-        if use_kde:
-            self.density = estimator(data, param_ranges, weights)
-        else:
-            self.density = estimator.NDhistogram(data, weights, param_ranges)
-        self.density /= np.max(self.density)
-
         if data.shape[1] > data.shape[0]:
             raise Exception('you have specified samples that have more dimensions that data points, '
                             'this is probably not what you want to do. data_list should be a list of datasets with'
                             'size (n_observations, n_dimensions)')
-        self._width_scale = samples_width_scale
-
         if param_ranges is None:
             means = [np.mean(data[:, i]) for i in range(0, data.shape[1])]
             widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
@@ -313,6 +305,11 @@ class DensitySamples(object):
         self._data = data
         self._weights = weights
         self.param_names = param_names
+        if use_kde:
+            self.density = estimator(data, self.param_ranges, weights)
+        else:
+            self.density = estimator.NDhistogram(data, weights, self.param_ranges)
+        self.density /= np.max(self.density)
 
     @property
     def effective_sample_size(self):

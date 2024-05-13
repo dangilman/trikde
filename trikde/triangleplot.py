@@ -380,7 +380,6 @@ class TrianglePlot(object):
                 if col < marg_in_row:
 
                     density = self._load_projection_2D(display_params[row], display_params[col], color_index)
-
                     self.triplot_densities.append(density)
                     self.joint_names.append(display_params[row]+'_'+display_params[col])
 
