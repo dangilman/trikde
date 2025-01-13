@@ -11,9 +11,6 @@ class InterpolatedLikelihood(object):
     """
     def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False):
 
-        #prod = independent_densities.density.T
-        #norm = np.max(prod)
-        #self.density = prod / norm
         self.density = independent_densities.density.T
         self.param_names, self.param_ranges = param_names, param_ranges
         nbins = np.shape(self.density)[0]
@@ -135,6 +132,24 @@ class IndependentLikelihoods(object):
         self.densities = density_samples_list
         self.param_names = density_samples_list[0].param_names
         self.param_ranges = density_samples_list[0].param_ranges
+
+    def __mul__(self, other):
+        density = self.densities + other.densities
+        return IndependentLikelihoods(density)
+
+    def __truediv__(self, other):
+
+        # here we want to divide this pdf
+        self_pdf = self.density
+        # by this one
+        other_pdf = other.density
+        # there we go...
+        density = self_pdf / other_pdf
+        # now we want to create a new DensitySamples class with this histogram/kde representation of the data
+        pdf = DensitySamples.from_histogram(density,
+                                            self.param_names,
+                                            self.param_ranges)
+        return IndependentLikelihoods([pdf])
 
     @property
     def density(self):
@@ -265,6 +280,14 @@ class CustomPriorHyperCube(object):
         self.density *= self.renormalization ** -1
 
     @property
+    def densities(self):
+        pdf = DensitySamples.from_histogram(self.density,
+                                            self.param_names,
+                                            self.param_ranges)
+        return [pdf]
+
+
+    @property
     def averaged(self):
         return self.density
 
@@ -275,7 +298,7 @@ class DensitySamples(object):
     """
 
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
-                 nbins=12, use_kde=False, samples_width_scale=3):
+                 nbins=12, use_kde=False, samples_width_scale=3, density=None):
 
         """
 
@@ -289,40 +312,47 @@ class DensitySamples(object):
         :param use_kde: bool; use a Gaussian KDE
         :param samples_width_scale: used to estimate the parameter ranges, determines parameter ranges using
         samples_width_scale standard deviations of the 1st dataset; only relevant if param_ranges is not specified
+        :param density: a numpy array of shape (ndim, ndim) that specifies the relative probability across the parameter space
+        if this is specified, data is not used
         """
 
-        estimator = KDE(bandwidth_scale, nbins)
-        if data.shape[1] > data.shape[0]:
-            raise Exception('you have specified samples that have more dimensions that data points, '
-                            'this is probably not what you want to do. data_list should be a list of datasets with'
-                            'size (n_observations, n_dimensions)')
-        if param_ranges is None:
-            means = [np.mean(data[:, i]) for i in range(0, data.shape[1])]
-            widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
-            self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
-        else:
+        if density is not None:
+            self.density = density
+            assert param_ranges is not None, 'When specifying the density directly, must also provide the parameter ranges ' \
+                                             'along each dimension'
             self.param_ranges = param_ranges
-        self._data = data
-        self._weights = weights
-        self.param_names = param_names
-        if use_kde:
-            self.density = estimator(data, self.param_ranges, weights)
+            assert param_names is not None, 'When specifying the density directly, must also provide the parameter names'
+            self.param_names = param_names
+
         else:
-            self.density = estimator.NDhistogram(data, weights, self.param_ranges)
+            estimator = KDE(bandwidth_scale, nbins)
+            if data.shape[1] > data.shape[0]:
+                raise Exception('you have specified samples that have more dimensions that data points, '
+                                'this is probably not what you want to do. data_list should be a list of datasets with'
+                                'size (n_observations, n_dimensions)')
+            if param_ranges is None:
+                means = [np.mean(data[:, i]) for i in range(0, data.shape[1])]
+                widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
+                self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
+            else:
+                self.param_ranges = param_ranges
+            self.param_names = param_names
+            if use_kde:
+                self.density = estimator(data, self.param_ranges, weights)
+            else:
+                self.density = estimator.NDhistogram(data, weights, self.param_ranges)
         self.density /= np.max(self.density)
 
-    @property
-    def effective_sample_size(self):
-
-        sample_size = self._data.shape[0]
-        if self._weights is None:
-            effective_sample_size = self._data.shape[0]
-        else:
-            w = self._weights / np.max(self._weights)
-            effective_sample_size = np.sum(w)
-        print('actual sample size: ', sample_size)
-        print('effective sample size: ', effective_sample_size)
-        return
+    @classmethod
+    def from_histogram(cls, density, param_names, param_ranges):
+        """
+        Create an instance of the class from a histogram
+        :param density: the histogram in ndim dimensions
+        :param param_names: parameter names; len(param_names) = ndim
+        :param param_ranges: parameter ranges along each dimension; len(parm_ranges) = ndim
+        :return:
+        """
+        return DensitySamples(None, param_names, None, param_ranges, density=density)
 
     def projection_1D(self, pname):
 

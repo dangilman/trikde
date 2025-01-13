@@ -795,7 +795,6 @@ def auto_decimal_places(param_min, param_max):
 
     return decimals, nticks
 
-
 def compute_confidence_intervals_histogram(sample, num_sigma):
     """
     computes the upper and lower sigma from the median value.

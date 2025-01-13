@@ -111,8 +111,13 @@ class KDE(object):
         # Compute the N-dimensional histogram
         H = self.NDhistogram(data, weights, ranges)
 
-        # compute the covariance, scale by the bandwidth
-        bandwidth = self.bandwidth_scale * self._scotts_factor(data.shape[0], dimension)
+        # compute the covariance, scale KDE kernel size by the bandwidth_scale parameter
+        if weights is not None:
+            normed_weights = weights / np.max(weights)
+            effective_sample_size = np.sum(normed_weights)
+        else:
+            effective_sample_size = data.shape[0]
+        bandwidth = self.bandwidth_scale * self._scotts_factor(effective_sample_size, dimension)
         covariance = bandwidth * np.cov(data.T)
 
         # invert covariance matrix
