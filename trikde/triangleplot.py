@@ -26,7 +26,7 @@ class TrianglePlot(object):
     _color_eval = 0.9
     show_intervals_68 = False
 
-    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat'):
+    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat', param_name_transformation=None):
 
         """
 
@@ -35,6 +35,7 @@ class TrianglePlot(object):
         :param custom_ticks:
         """
 
+        self.param_name_transformation = param_name_transformation
         self.param_names = independent_likelihoods_list[0].param_names
         self._nchains = len(independent_likelihoods_list)
         if param_ranges is None:
@@ -72,6 +73,30 @@ class TrianglePlot(object):
         self._color_eval = color_eval
         self._marginal_col = marginal_col
 
+    def contour_area(self, p1, p2, pdf_index):
+
+        density = self._load_projection_2D(p1, p2, pdf_index)
+        extent, aspect = self._extent_aspect([p1, p2])
+        pmin1, pmax1 = extent[0], extent[1]
+        pmin2, pmax2 = extent[2], extent[3]
+
+        coordsx = np.linspace(extent[0], extent[1], density.shape[0])
+        coordsy = np.linspace(extent[2], extent[3], density.shape[1])
+
+        levels = [0.05, 0.32, 1.0]
+        levels = np.array(levels) * np.max(grid)
+        X, Y = np.meshgrid(x, y)
+
+        ax = plt.gca()
+        contours = ax.contour(X, Y, density, levels, extent=extent,
+                       colors=contour_colors, linewidths=linewidths, zorder=1, linestyles=['dashed', 'solid'])
+
+        self._contours(coordsx, coordsy, density, ax, extent=extent,
+                       contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
+                       levels=levels)
+        ax.set_xlim(pmin1, pmax1)
+        ax.set_ylim(pmin2, pmax2)
+
     def make_joint(self, p1, p2, contour_colors=None, levels=[0.05, 0.22, 1],
                    filled_contours=True, contour_alpha=0.6,
                    fig_size=8, label_scale=1, tick_label_font=12,
@@ -98,7 +123,7 @@ class TrianglePlot(object):
             ims.append(im)
         return axes, ims
 
-    def make_triplot(self, contour_levels=[0.05, 0.22, 1],
+    def make_triplot(self, contour_levels=[0.05, 0.32, 1],
                      filled_contours=True, contour_alpha=0.6,
                      fig_size=8, truths=None, contour_colors=None,
                      axis_label_font=16, tick_label_font=12,
@@ -157,7 +182,7 @@ class TrianglePlot(object):
 
         return axes
 
-    def make_marginal(self, p1, contour_colors=None, levels=[0.05, 0.22, 1],
+    def make_marginal(self, p1, contour_colors=None, levels=[0.05, 0.32, 1],
                       filled_contours=True, contour_alpha=0.6, param_names=None,
                       fig_size=8, truths=None, load_from_file=True,
                       transpose_idx=None, bandwidth_scale=0.7, label_scale=1,
@@ -461,7 +486,7 @@ class TrianglePlot(object):
                             assert isinstance(truths, list), 'if specified, truths must be a dictionary or a ' \
                                                              'list of dictionaries'
                             if self.truth_color_list is None:
-                                self.truth_color_list = [self.truth_color, 'k', '0.6', '0.3']
+                                self.truth_color_list = [self.truth_color, 'y', '0.6', '0.3']
                             for truth_index in range(0, len(truths)):
                                 t1, t2 = truths[truth_index][display_params[col]], truths[truth_index][display_params[row]]
                                 axes[plot_index].scatter(t1, t2, color=self.truth_color_list[truth_index], s=50)
@@ -706,7 +731,12 @@ class TrianglePlot(object):
         tick_locs = np.round(np.linspace(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1], nticks), decimals)
         tick_labels = tick_locs
 
-        return tick_locs, tick_labels, pname, rotation
+        if self.param_name_transformation is None:
+            param_name = pname
+        else:
+            param_name = self.param_name_transformation(pname)
+
+        return tick_locs, tick_labels, param_name, rotation
 
     def get_parameter_confidence_interval(self, parameter, clevel, chain_num=None,
                                           show_percentage=False, return_intervals=False,

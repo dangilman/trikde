@@ -141,7 +141,6 @@ class KDE(object):
             edge_kernel = BoundaryCorrection(gaussian_kernel)
             renormalization = edge_kernel.first_order_correction
             density *= renormalization ** -1
-
         return density
 
 class BoundaryCorrection(object):
