@@ -97,7 +97,7 @@ class TrianglePlot(object):
         ax.set_xlim(pmin1, pmax1)
         ax.set_ylim(pmin2, pmax2)
 
-    def make_joint(self, p1, p2, contour_colors=None, levels=[0.05, 0.22, 1],
+    def make_joint(self, p1, p2, contour_colors=None, levels=[0.05, 0.32, 1],
                    filled_contours=True, contour_alpha=0.6,
                    fig_size=8, label_scale=1, tick_label_font=12,
                      xtick_label_rotate=0, show_contours=True,norm=None,
