@@ -1,7 +1,7 @@
 import numpy as np
 from trikde.kde import KDE
 from trikde.kde import BoundaryCorrection
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
 
@@ -122,7 +122,6 @@ class GaussianWeight(object):
 class IndependentLikelihoods(object):
 
     def __init__(self, density_samples_list):
-
         """
         :param density_samples_list: a list of DensitySamples instances,
         will be multiplied together to obtain the final distribution
@@ -137,8 +136,14 @@ class IndependentLikelihoods(object):
         density = self.densities + other.densities
         return IndependentLikelihoods(density)
 
-    def __truediv__(self, other):
+    def __add__(self, other):
+        assert len(other.densities) == len(self.densities)
+        density_list = []
+        for i in range(0, len(other.densities)):
+            density_list.append(self.densities[i] + other.densities[i])
+        return IndependentLikelihoods(density_list)
 
+    def __truediv__(self, other):
         # here we want to divide this pdf
         self_pdf = self.density
         # by this one
@@ -291,6 +296,48 @@ class CustomPriorHyperCube(object):
     def averaged(self):
         return self.density
 
+def CI(samples, level=68):
+    import scipy.stats as st
+
+    # example data set
+
+    pk, _xk = np.histogram(samples, bins=100, range=(min(samples), max(samples)))
+    xk = _xk[0:-1] + (_xk[1] - _xk[0]) / 2
+    pk = pk / np.sum(pk)
+    # create custom discrete random variable from data set
+    rv = st.rv_discrete(values=(xk, pk))
+
+    # scipy.stats.rv_discrete has methods for median, confidence interval, etc.
+    #print("median:", rv.median())
+    #print("68% CI:", rv.interval(level/100))
+    return rv.median(), rv.interval(level/100)
+
+def estimate_parameter_ranges(data, CI_level=1, scale_width=1.5):
+    """
+
+    :param data:
+    :param CI_level:
+    :param scale_width:
+    :return:
+    """
+    param_ranges = []
+    if CI_level == 1:
+        level = 68
+    elif CI_level == 2:
+        level = 95
+    elif CI_level == 3:
+        level = 99
+    else:
+        raise ValueError('samples_width_scale must be 1, 2, or 3 when estimating parameter ranges; numbers '
+                         'correspond to 68%, 95%, and 99% CI, respectively')
+    for i in range(data.shape[1]):
+        med, interval = CI(data[:, i], level)
+        step_low = med - interval[0]
+        step_high = interval[1] - med
+        new_interval = [med - scale_width*step_low, med + scale_width*step_high]
+        param_ranges.append(new_interval)
+    return param_ranges
+
 class DensitySamples(object):
 
     """
@@ -315,7 +362,6 @@ class DensitySamples(object):
         :param density: a numpy array of shape (ndim, ndim) that specifies the relative probability across the parameter space
         if this is specified, data is not used
         """
-
         if density is not None:
             self.density = density
             assert param_ranges is not None, 'When specifying the density directly, must also provide the parameter ranges ' \
@@ -323,7 +369,6 @@ class DensitySamples(object):
             self.param_ranges = param_ranges
             assert param_names is not None, 'When specifying the density directly, must also provide the parameter names'
             self.param_names = param_names
-
         else:
             estimator = KDE(bandwidth_scale, nbins)
             if data.shape[1] > data.shape[0]:
@@ -331,9 +376,10 @@ class DensitySamples(object):
                                 'this is probably not what you want to do. data_list should be a list of datasets with'
                                 'size (n_observations, n_dimensions)')
             if param_ranges is None:
-                means = [np.mean(data[:, i]) for i in range(0, data.shape[1])]
-                widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
-                self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
+                self.param_ranges = estimate_parameter_ranges(data, samples_width_scale)
+                # means = [np.median(data[:, i]) for i in range(0, data.shape[1])]
+                # widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
+                #self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
             else:
                 self.param_ranges = param_ranges
             self.param_names = param_names
@@ -342,6 +388,16 @@ class DensitySamples(object):
             else:
                 self.density = estimator.NDhistogram(data, weights, self.param_ranges)
         self.density /= np.max(self.density)
+
+    def __add__(self, other):
+        for name_self, name_other in zip(self.param_names, other.param_names):
+            assert name_self == name_other
+        for range_self, range_other in zip(self.param_ranges, other.param_ranges):
+            assert range_self[0] == range_other[0]
+            assert range_self[1] == range_other[1]
+        pdf_self = self.density
+        pdf_other = other.density
+        return DensitySamples.from_histogram(pdf_self + pdf_other, self.param_names, self.param_ranges)
 
     @classmethod
     def from_histogram(cls, density, param_names, param_ranges):
@@ -355,7 +411,6 @@ class DensitySamples(object):
         return DensitySamples(None, param_names, None, param_ranges, density=density)
 
     def projection_1D(self, pname):
-
         """
         Returns the 1D marginal pdf of the parameter 'pname'
         :param pname: parameter name
@@ -371,7 +426,6 @@ class DensitySamples(object):
         return projection
 
     def projection_2D(self, p1, p2):
-
         """
         Returns the 2D marginal pdf of the parameters 'p1', 'p2'
         :param p1: parameter name 1
