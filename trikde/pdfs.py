@@ -339,11 +339,9 @@ def estimate_parameter_ranges(data, CI_level=1, scale_width=1.5):
     return param_ranges
 
 class DensitySamples(object):
-
     """
     This class combins several instances of SingleDensity, that are combined by averaging
     """
-
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
                  nbins=12, use_kde=False, samples_width_scale=3, density=None):
 

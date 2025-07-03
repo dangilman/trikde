@@ -26,16 +26,22 @@ class TrianglePlot(object):
     _color_eval = 0.9
     show_intervals_68 = False
 
-    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat', param_name_transformation=None):
-
+    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat', param_name_transformation=None,
+                 ticks_and_labels_settings=None):
         """
 
-        :param independent_likelihoods_list: a list of IndependentLikelihoods classes (see trikde.pdfs)
-        :param cmap: name of the color map to use if not using filled contours
-        :param custom_ticks:
+        :param independent_likelihoods_list: a list of IndependentLikelihood classes; each one gets plotted as a set of
+        2D contours/marginal likelihoods
+        :param param_ranges: a list of parameter ranges; if None, will use the ones stored in the IndependentLikelihoods
+        classes
+        :param cmap: a colormap for the 2D projected marginal likelihoods to be used when filled_contours=False
+        :param param_name_transformation: a function that takes as input a parameter name string and returns another string,
+        perhaps a Latex command
+        :param ticks_and_labels_settings: a dictionary containing tick locations, labels, and rotation for each parameter
         """
 
         self.param_name_transformation = param_name_transformation
+        self._ticks_and_labels_settings = ticks_and_labels_settings
         self.param_names = independent_likelihoods_list[0].param_names
         self._nchains = len(independent_likelihoods_list)
         if param_ranges is None:
@@ -128,7 +134,7 @@ class TrianglePlot(object):
                      fig_size=8, truths=None, contour_colors=None,
                      axis_label_font=16, tick_label_font=12,
                      xtick_label_rotate=0, show_contours=True,
-                     marginal_alpha=0.6, show_intervals=True,
+                     show_intervals=True,
                      display_params=None, figure=1):
 
         self.fig = plt.figure(figure)
@@ -161,7 +167,7 @@ class TrianglePlot(object):
                                              fig_size, truths, tick_label_font=tick_label_font,
                                              xtick_label_rotate=xtick_label_rotate,
                                              axis_label_font=axis_label_font, cmap=self.cmap_call, show_contours=show_contours,
-                                             marginal_alpha=marginal_alpha, show_intervals=show_intervals,
+                                             show_intervals=show_intervals,
                                              display_params=display_params))
 
         for key in display_params:
@@ -231,7 +237,7 @@ class TrianglePlot(object):
 
         density = self._load_projection_1D(p1, color_index)
 
-        xtick_locs, xtick_labels, xlabel, rotation = self.ticks_and_labels(p1)
+        xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(p1, axis='x')
         pmin, pmax = self._get_param_minmax(p1)
 
         coords = np.linspace(pmin, pmax, len(density))
@@ -310,8 +316,8 @@ class TrianglePlot(object):
         pmin1, pmax1 = extent[0], extent[1]
         pmin2, pmax2 = extent[2], extent[3]
 
-        xtick_locs, xtick_labels, xlabel, rotation = self.ticks_and_labels(p1)
-        ytick_locs, ytick_labels, ylabel, _ = self.ticks_and_labels(p2)
+        xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(p1, axis='x')
+        ytick_locs, ytick_labels, ylabel = self.ticks_and_labels(p2, axis='y')
 
         if filled_contours:
             if logscale:
@@ -374,7 +380,7 @@ class TrianglePlot(object):
                         filled_contours=True, contour_alpha=0.6, fig_size=8,
                         truths=None, tick_label_font=14, xtick_label_rotate=0,
                         axis_label_font=None, cmap=None,
-                        show_contours=True, marginal_alpha=0.9, show_intervals=True,
+                        show_contours=True, show_intervals=True,
                         display_params=None):
 
         if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
@@ -412,8 +418,10 @@ class TrianglePlot(object):
                     pmin1, pmax1 = extent[0], extent[1]
                     pmin2, pmax2 = extent[2], extent[3]
 
-                    xtick_locs, xtick_labels, xlabel, rotation = self.ticks_and_labels(display_params[col])
-                    ytick_locs, ytick_labels, ylabel, _ = self.ticks_and_labels(display_params[row])
+                    xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(display_params[col],
+                                                                                       axis='x')
+                    ytick_locs, ytick_labels, ylabel = self.ticks_and_labels(display_params[row],
+                                                                                axis='y')
 
                     if row == n_subplots - 1:
 
@@ -458,7 +466,6 @@ class TrianglePlot(object):
                         axes[plot_index].set_ylim(pmin2, pmax2)
 
                     else:
-
                         vmax = np.max(density)
                         axes[plot_index].imshow(density.T, origin='lower', cmap=self.cmap, alpha=1, vmin=0,
                                                 vmax=vmax, aspect=aspect, extent=extent)
@@ -500,7 +507,7 @@ class TrianglePlot(object):
 
                     density = self._load_projection_1D(display_params[col], color_index)
 
-                    xtick_locs, xtick_labels, xlabel, rotation = self.ticks_and_labels(display_params[col])
+                    xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(display_params[col], axis='x')
                     pmin, pmax = self._get_param_minmax(display_params[col])
                     coords = np.linspace(pmin, pmax, len(density))
 
@@ -514,26 +521,26 @@ class TrianglePlot(object):
 
                         if filled_contours:
                             axes[plot_index].plot([x1, x2], [y, y], color=contour_colors[color_index][1],
-                                                  alpha=1)
+                                                  alpha=0.9)
                             axes[plot_index].fill_between([x1, x2], y, color=contour_colors[color_index][1],
-                                                          alpha=marginal_alpha)
+                                                          alpha=contour_alpha)
                             axes[plot_index].plot([x1, x1], [0, y], color=contour_colors[color_index][1],
-                                                  alpha=1)
+                                                  alpha=0.9)
                             axes[plot_index].plot([x2, x2], [0, y], color=contour_colors[color_index][1],
-                                                  alpha=1)
+                                                  alpha=0.9)
                         else:
                             if self._marginal_col is None:
                                 marginal_col = cmap(self._color_eval)
                             else:
                                 marginal_col = self._marginal_col
                             axes[plot_index].plot([x1, x2], [y, y], color=marginal_col,
-                                                  alpha=1)
+                                                  alpha=0.9)
                             axes[plot_index].fill_between([x1, x2], y, color=marginal_col,
-                                                          alpha=marginal_alpha)
+                                                          alpha=contour_alpha)
                             axes[plot_index].plot([x1, x1], [0, y], color=marginal_col,
-                                                  alpha=1)
+                                                  alpha=0.9)
                             axes[plot_index].plot([x2, x2], [0, y], color=marginal_col,
-                                                  alpha=1)
+                                                  alpha=0.9)
 
                     axes[plot_index].set_xlim(pmin, pmax)
                     axes[plot_index].set_yticks([])
@@ -722,21 +729,27 @@ class TrianglePlot(object):
                        levels=levels,
                        linewidths=linewidths)
 
-    def ticks_and_labels(self, pname):
-
-        rotation = self._tick_rotation
-
-        decimals, nticks = auto_decimal_places(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1])
-
-        tick_locs = np.round(np.linspace(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1], nticks), decimals)
-        tick_labels = tick_locs
+    def ticks_and_labels(self, pname, axis=None):
+        """
+        Set the tick locations, labels, and rotation
+        :param pname: parameter name
+        :param axis: 'x' or 'y'
+        :return:
+        """
+        if self._ticks_and_labels_settings is None:
+            decimals, nticks = auto_decimal_places(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1])
+            tick_locs = np.round(np.linspace(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1], nticks), decimals)
+            tick_labels = tick_locs
+        else:
+            tick_locs = self._ticks_and_labels_settings[pname]['tick_locations']
+            tick_labels = self._ticks_and_labels_settings[pname]['tick_labels']
 
         if self.param_name_transformation is None:
             param_name = pname
         else:
             param_name = self.param_name_transformation(pname)
 
-        return tick_locs, tick_labels, param_name, rotation
+        return tick_locs, tick_labels, param_name
 
     def get_parameter_confidence_interval(self, parameter, clevel, chain_num=None,
                                           show_percentage=False, return_intervals=False,
