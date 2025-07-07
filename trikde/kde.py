@@ -1,23 +1,120 @@
 import numpy as np
 from scipy.signal import fftconvolve
+from scipy.interpolate import RegularGridInterpolator
 
 
-class KDE(object):
+class PointInterp(object):
+
+    def __init__(self, nbins):
+        """
+
+        :param nbins:
+        """
+        self._nbins = nbins
+
+    @staticmethod
+    def _get_coordinates(ranges, num_bins):
+
+        """
+        Builds an array of coordinate values from the specified parameter ranges
+        :param ranges: parameter ranges
+        :return: array of coordinate values
+        """
+        points = []
+        for i in range(0, len(ranges)):
+            points.append(np.linspace(ranges[i][0], ranges[i][1], num_bins))
+        return points
+
+    def NDhistogram(self, data, weights, ranges, nbins=None):
+
+        """
+
+        :param data: data to make the histogram. Shape (nsamples, ndim)
+        :param coordinates: np.linspace(min, max, nbins) for each dimension
+        :param ranges: parameter ranges corresponding to columns in data
+        :param weights: param weights
+        :return: histogram
+        """
+        if nbins is None:
+            nbins = self._nbins
+        coordinates = self._get_coordinates(ranges, nbins)
+        histbins = []
+        for i, coord in enumerate(coordinates):
+            histbins.append(np.linspace(ranges[i][0], ranges[i][-1], len(coord) + 1))
+        H, _ = np.histogramdd(data, range=ranges, bins=histbins, weights=weights)
+        return H.T
+
+
+class LinearKDE(PointInterp):
+
+    def __init__(self, nbins, nbins_eval, resampling=True, n_resample=100000):
+        """
+
+        :param nbins:
+        :param nbins_eval:
+        :param resampling:
+        :param n_resample:
+        """
+        self._nbins_eval = nbins_eval
+        self._resampling = resampling
+        self._n_resample = n_resample
+        super(LinearKDE, self).__init__(nbins)
+
+    def __call__(self, data, ranges, weights):
+
+        """
+
+        :param data: data to make the histogram, shape = (n_observations, ndim)
+        :param ranges: a list of parameter ranges corresponding to each dimension
+        :param weights: importance weights for each observation
+        :return: the KDE estimate of the data
+        """
+
+        # number of dimensions
+        ndim = len(ranges)
+        # compute coordinate arrays for each parameter
+        coordinates = self._get_coordinates(ranges, self._nbins)
+        # Compute the N-dimensional histogram
+        values = self.NDhistogram(data, weights, ranges)
+        interp = RegularGridInterpolator(coordinates, values,
+                                         method='linear',
+                                         bounds_error=True)
+        if self._resampling:
+            weights = np.empty(self._n_resample)
+            points = np.empty((self._n_resample, ndim))
+            for i in range(0, self._n_resample):
+                p = [np.random.uniform(ranges[i][0], ranges[i][1]) for i in range(0, ndim)]
+                weights[i] = float(interp(tuple(p)))
+                points[i] = p
+            density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+        else:
+            coordinates = self._get_coordinates(ranges, self._nbins_eval)
+            coords = np.meshgrid(*coordinates)
+            n_resample = self._nbins_eval ** ndim
+            points = np.empty((n_resample, ndim))
+            for i in range(0, ndim):
+                points[:,i] = coords[i].ravel()
+            weights = interp(points)
+            density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+        return density
+
+
+class KDE(PointInterp):
     """
     This class implements a Gaussian kernel density estimator in arbitrary dimensions with a first order renormalization
     at the boundary of parameter space
     """
 
-    def __init__(self, bandwidth_scale=1, nbins=None):
+    def __init__(self, bandwidth_scale=1, nbins=None, boundary_order=1):
 
         """
 
         :param bandwidth_scale: scales the kernel bandwidth, or the variance of each Gaussian
         :param nbins: number of bins in the KDE
         """
-
         self.bandwidth_scale = bandwidth_scale
-        self._nbins = nbins
+        self._boundary_order = boundary_order
+        super(KDE, self).__init__(nbins)
 
     def _scotts_factor(self, n, d):
 
@@ -40,49 +137,12 @@ class KDE(object):
         :param n_reshape: shape of output
         :return: gaussian KDE evalauted at coords
         """
-
         def _gauss(_x):
             return np.exp(-0.5 * np.dot(np.dot(_x, inverse_cov_matrix), _x))
-
         z = [_gauss(coord) for coord in coords_centered]
-
         return np.reshape(z, tuple([n_reshape] * dimension))
 
-    def _get_coordinates(self, ranges):
-
-        """
-        Builds an array of coordinate values from the specified parameter ranges
-        :param ranges: parameter ranges
-        :return: array of coordinate values
-        """
-        points = []
-
-        for i in range(0, len(ranges)):
-            points.append(np.linspace(ranges[i][0], ranges[i][1], self._nbins))
-        return points
-
-    def NDhistogram(self, data, weights, ranges):
-
-        """
-
-        :param data: data to make the histogram. Shape (nsamples, ndim)
-        :param coordinates: np.linspace(min, max, nbins) for each dimension
-        :param ranges: parameter ranges corresponding to columns in data
-        :param weights: param weights
-        :return: histogram
-        """
-
-        coordinates = self._get_coordinates(ranges)
-
-        histbins = []
-        for i, coord in enumerate(coordinates):
-            histbins.append(np.linspace(ranges[i][0], ranges[i][-1], len(coord) + 1))
-
-        H, _ = np.histogramdd(data, range=ranges, bins=histbins, weights=weights)
-
-        return H.T
-
-    def __call__(self, data, ranges, weights, boundary_order=1):
+    def __call__(self, data, ranges, weights):
 
         """
 
@@ -93,7 +153,7 @@ class KDE(object):
         """
 
         # compute coordinate arrays for each parameter
-        coordinates = self._get_coordinates(ranges)
+        coordinates = self._get_coordinates(ranges, self._nbins)
 
         # shift coordinate arrays so that the center is at (0, 0)
         X = np.meshgrid(*coordinates)
@@ -133,7 +193,7 @@ class KDE(object):
         density = fftconvolve(H, gaussian_kernel, mode='same')
 
         # renormalize the boundary to remove bias
-        if boundary_order == 1:
+        if self._boundary_order == 1:
 
             #boundary_kernel = np.ones(np.shape(H))
             #boundary_normalization = fftconvolve(gaussian_kernel, boundary_kernel, mode='same')

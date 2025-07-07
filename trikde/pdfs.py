@@ -1,5 +1,5 @@
 import numpy as np
-from trikde.kde import KDE
+from trikde.kde import KDE, LinearKDE
 from trikde.kde import BoundaryCorrection
 from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
@@ -343,7 +343,8 @@ class DensitySamples(object):
     This class combins several instances of SingleDensity, that are combined by averaging
     """
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
-                 nbins=12, use_kde=False, samples_width_scale=3, density=None):
+                 nbins=12, use_kde='LINEAR', samples_width_scale=3, density=None,
+                 nbins_eval=None, resampling=False, n_resample=100000):
 
         """
 
@@ -354,11 +355,15 @@ class DensitySamples(object):
         dataset in data_list
         :param bandwidth_scale: rescales the kernel bandwidth, only applicable for Gaussian KDE
         :param nbins: number of bins for histogram/KDE
-        :param use_kde: bool; use a Gaussian KDE
+        :param use_kde: bool or string; specifies the type of KDE to use, options are 'GAUSSIAN', 'LINEAR', or False (no kde)
         :param samples_width_scale: used to estimate the parameter ranges, determines parameter ranges using
         samples_width_scale standard deviations of the 1st dataset; only relevant if param_ranges is not specified
         :param density: a numpy array of shape (ndim, ndim) that specifies the relative probability across the parameter space
-        if this is specified, data is not used
+            if this is specified, data is not used
+        :param nbins_eval: the number of bins on which to output the final pdf if using kde_type='LINEAR'
+        :param resampling: when using LINEAR kde, specifies whether the final pdf is obtained from resampling the prior
+        and weighting by interpolation function
+        :param n_resample: the number of points to draw when resampling
         """
         if density is not None:
             self.density = density
@@ -368,16 +373,28 @@ class DensitySamples(object):
             assert param_names is not None, 'When specifying the density directly, must also provide the parameter names'
             self.param_names = param_names
         else:
-            estimator = KDE(bandwidth_scale, nbins)
             if data.shape[1] > data.shape[0]:
                 raise Exception('you have specified samples that have more dimensions that data points, '
                                 'this is probably not what you want to do. data_list should be a list of datasets with'
                                 'size (n_observations, n_dimensions)')
+
+            if use_kde == 'GAUSSIAN':
+                estimator = KDE(bandwidth_scale, nbins)
+            elif use_kde == 'LINEAR':
+                if nbins_eval is None:
+                    nbins_eval = nbins
+                estimator = LinearKDE(nbins,
+                                      nbins_eval,
+                                      resampling=resampling,
+                                      n_resample=n_resample)
+            elif use_kde is False:
+                # we still use the NDHistogram
+                estimator = KDE(bandwidth_scale, nbins)
+            else:
+                raise ValueError('kde_type must be GAUSSIAN or LINEAR')
+
             if param_ranges is None:
                 self.param_ranges = estimate_parameter_ranges(data, samples_width_scale)
-                # means = [np.median(data[:, i]) for i in range(0, data.shape[1])]
-                # widths = [np.std(data[:, i]) for i in range(0, data.shape[1])]
-                #self.param_ranges = [[mu - samples_width_scale * s, mu + samples_width_scale * s] for mu, s in zip(means, widths)]
             else:
                 self.param_ranges = param_ranges
             self.param_names = param_names
