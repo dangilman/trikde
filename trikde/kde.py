@@ -60,7 +60,7 @@ class LinearKDE(PointInterp):
         self._n_resample = n_resample
         super(LinearKDE, self).__init__(nbins)
 
-    def __call__(self, data, ranges, weights):
+    def __call__(self, data, ranges, weights, n_cpu=1):
 
         """
 
@@ -82,10 +82,9 @@ class LinearKDE(PointInterp):
         if self._resampling:
             weights = np.empty(self._n_resample)
             points = np.empty((self._n_resample, ndim))
-            for i in range(0, self._n_resample):
-                p = [np.random.uniform(ranges[i][0], ranges[i][1]) for i in range(0, ndim)]
-                weights[i] = float(interp(tuple(p)))
-                points[i] = p
+            for i in range(0, ndim):
+                points[:, i] = np.random.uniform(ranges[i][0], ranges[i][1], self._n_resample)
+            weights = interp(points)
             density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
         else:
             coordinates = self._get_coordinates(ranges, self._nbins_eval)
@@ -105,15 +104,18 @@ class KDE(PointInterp):
     at the boundary of parameter space
     """
 
-    def __init__(self, bandwidth_scale=1, nbins=None, boundary_order=1):
+    def __init__(self, bandwidth_scale=1, nbins=None, boundary_order=1, use_cov=True):
 
         """
-
-        :param bandwidth_scale: scales the kernel bandwidth, or the variance of each Gaussian
-        :param nbins: number of bins in the KDE
+        Gaussian kernel density estimator with first-order boundary correction
+        :param bandwidth_scale: scales the bandwidth of the kernel density estimator relative to Scott's factor value
+        :param nbins: number of bins for output pdf
+        :param boundary_order: 1 (first order) or 0 (no correction)
+        :param use_cov: bool; use the covariance matrix of samples to define the Gaussian kernels
         """
         self.bandwidth_scale = bandwidth_scale
         self._boundary_order = boundary_order
+        self._use_cov = use_cov
         super(KDE, self).__init__(nbins)
 
     def _scotts_factor(self, n, d):
@@ -179,7 +181,8 @@ class KDE(PointInterp):
             effective_sample_size = data.shape[0]
         bandwidth = self.bandwidth_scale * self._scotts_factor(effective_sample_size, dimension)
         covariance = bandwidth * np.cov(data.T)
-
+        if self._use_cov is False:
+            covariance *= np.eye(dimension)
         # invert covariance matrix
         if dimension > 1:
             c_inv = np.linalg.inv(covariance)

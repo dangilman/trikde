@@ -344,7 +344,7 @@ class DensitySamples(object):
     """
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
                  nbins=12, use_kde='LINEAR', samples_width_scale=3, density=None,
-                 nbins_eval=None, resampling=False, n_resample=100000):
+                 nbins_eval=None, resampling=True, n_resample=1000000):
 
         """
 
@@ -380,6 +380,8 @@ class DensitySamples(object):
 
             if use_kde == 'GAUSSIAN':
                 estimator = KDE(bandwidth_scale, nbins)
+            elif use_kde == 'GAUSSIAN_NO_COV':
+                estimator = KDE(bandwidth_scale, nbins, use_cov=False)
             elif use_kde == 'LINEAR':
                 if nbins_eval is None:
                     nbins_eval = nbins
@@ -387,7 +389,7 @@ class DensitySamples(object):
                                       nbins_eval,
                                       resampling=resampling,
                                       n_resample=n_resample)
-            elif use_kde is False:
+            elif use_kde is False or use_kde is None:
                 # we still use the NDHistogram
                 estimator = KDE(bandwidth_scale, nbins)
             else:
