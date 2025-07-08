@@ -393,7 +393,7 @@ class DensitySamples(object):
                 # we still use the NDHistogram
                 estimator = KDE(bandwidth_scale, nbins)
             else:
-                raise ValueError('kde_type must be GAUSSIAN or LINEAR')
+                raise ValueError('kde_type must be GAUSSIAN, GAUSSIAN_NO_COV, or LINEAR')
 
             if param_ranges is None:
                 self.param_ranges = estimate_parameter_ranges(data, samples_width_scale)
