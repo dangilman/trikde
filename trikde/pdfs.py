@@ -556,8 +556,11 @@ class DensitySamples(object):
             projection = projection.T
         return projection
 
+
+#WARNING: THIS RETURNS A TRANSPOSE BUT I'M NOT SURE IF THIS IS CORRECT.
 def likelihood_function_change(like1, like2, param_ranges, n_draw=50000, nbins=5):
     """
+    WARNING: THIS RETURNS A TRANSPOSE BUT I'M NOT SURE IF THIS IS CORRECT.
     This function evaluates the change or derivative between two two-dimensional likelihood functions
 
     :param like1: the first likelihood
