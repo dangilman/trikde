@@ -328,7 +328,7 @@ class MultivariateNormalPriorHyperCube(object):
         self.param_names = param_names
         self.param_ranges = param_ranges
         ##why are we taking the transpose of histogram dd here??
-        self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0].T
+        self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0]#.T
 
     @property
     def averaged(self):
