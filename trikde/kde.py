@@ -1,6 +1,10 @@
 import numpy as np
 from scipy.signal import fftconvolve
 from scipy.interpolate import RegularGridInterpolator
+from scipy import ndimage
+
+import numpy as np
+
 
 
 class PointInterp(object):
@@ -11,6 +15,49 @@ class PointInterp(object):
         :param nbins:
         """
         self._nbins = nbins
+
+
+    def sharing_is_caring(self, counts, factor=3):
+        """
+        shamelessly copied from chatgpt output...used more awesome function name.
+        ### use odd factors so that the original bin center is associated with a final bin.
+        Uniformly split every coarse histogram bin into ``factor`` sub‑bins
+        along each axis, conserving the total counts.
+
+        Parameters
+        ----------
+        counts : ndarray
+            The original N‑D histogram array (integer or float).
+        factor : int, optional
+            Integer zoom factor per axis (same for all axes).  Default is 3.
+
+        Returns
+        -------
+        ndarray
+            An array with shape ``tuple(s * factor for s in counts.shape)``.
+            The sum over any coarse‑bin–sized block equals the original
+            value of that coarse bin, so the global sum is preserved.
+        """
+        factor = int(factor)
+        # 1) replicate each bin `factor` times along every axis
+        up = counts.astype(float)
+        for ax in range(up.ndim):
+            up = np.repeat(up, factor, axis=ax)
+
+        # 2) divide so that the replicated block sums to the original value
+        return up / (factor ** up.ndim)
+
+
+    def get_bins(self, ranges, num_bins):
+        histbins = []
+        histcens = []
+        for i in range(0, len(ranges)):
+            t_bin_edges = np.linspace(ranges[i][0], ranges[i][-1], num_bins + 1)
+            t_bin_cens = (t_bin_edges[1:] + t_bin_edges[:-1]) / 2
+            histbins.append(t_bin_edges)
+            histcens.append(t_bin_cens)
+
+        return histbins, histcens
 
     @staticmethod
     def _get_coordinates(ranges, num_bins):
@@ -33,21 +80,25 @@ class PointInterp(object):
         :param coordinates: np.linspace(min, max, nbins) for each dimension
         :param ranges: parameter ranges corresponding to columns in data
         :param weights: param weights
-        :return: histogram
+        :return: histogram, histogram bin edges, histogram bin centers
         """
         if nbins is None:
             nbins = self._nbins
-        coordinates = self._get_coordinates(ranges, nbins)
-        histbins = []
-        for i, coord in enumerate(coordinates):
-            histbins.append(np.linspace(ranges[i][0], ranges[i][-1], len(coord) + 1))
-        H, _ = np.histogramdd(data, range=ranges, bins=histbins, weights=weights)
-        return H.T
+        #coordinates = self._get_coordinates(ranges, nbins)
+        #histbins = []
+        #for i, coord in enumerate(coordinates):
+        #    histbins.append(np.linspace(ranges[i][0], ranges[i][-1], len(coord) + 1))
+        bin_edges, bin_centers = self.get_bins(ranges, nbins)
+
+        H, _ = np.histogramdd(data, range=ranges, bins=bin_edges, weights=weights)
+
+        ##update this to no longer return the transpose, since this is not needed for default methods.
+        return H, bin_edges, bin_centers
 
 
 class LinearKDE(PointInterp):
 
-    def __init__(self, nbins, nbins_eval, resampling=True, n_resample=100000):
+    def __init__(self, nbins, nbins_eval, resampling=True, n_resample=100000, sharing_interp = False):
         """
 
         :param nbins:
@@ -58,6 +109,7 @@ class LinearKDE(PointInterp):
         self._nbins_eval = nbins_eval
         self._resampling = resampling
         self._n_resample = n_resample
+        self._sharing_interp = sharing_interp
         super(LinearKDE, self).__init__(nbins)
 
     def __call__(self, data, ranges, weights, n_cpu=1):
@@ -72,29 +124,78 @@ class LinearKDE(PointInterp):
 
         # number of dimensions
         ndim = len(ranges)
-        # compute coordinate arrays for each parameter
-        coordinates = self._get_coordinates(ranges, self._nbins)
+        #no longer use coordinates function
+        ## compute coordinate arrays for each parameter
+        ##coordinates = self._get_coordinates(ranges, self._nbins)
+
         # Compute the N-dimensional histogram
-        values = self.NDhistogram(data, weights, ranges)
-        interp = RegularGridInterpolator(coordinates, values,
-                                         method='linear',
-                                         bounds_error=True)
+        values, bin_edges, bin_centers = self.NDhistogram(data, weights, ranges)
+        ##can use this for just multiplying histogram centers together if you want.
+        if self._nbins_eval == self._nbins:
+            return values
+
         if self._resampling:
-            weights = np.empty(self._n_resample)
+            ## use regular grid interpolator since the output coordinates from re-sampling random
+            ## allow extrapolation beyond the bin center edges.
+            interp = RegularGridInterpolator(bin_centers, values,
+                                                                             method='linear',
+                                                                             bounds_error=False,
+                                                                             fill_value=None)
+            #weights = np.empty(self._n_resample)
             points = np.empty((self._n_resample, ndim))
             for i in range(0, ndim):
                 points[:, i] = np.random.uniform(ranges[i][0], ranges[i][1], self._n_resample)
             weights = interp(points)
-            density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+            ## leaving this here in case we do need the transpose, but ND histogram is no longer returning the transpose.
+            #density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+            density, bin_edges, bin_centers = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval)
+
         else:
-            coordinates = self._get_coordinates(ranges, self._nbins_eval)
+
+            '''coordinates = self._get_coordinates(ranges, self._nbins_eval)
             coords = np.meshgrid(*coordinates)
             n_resample = self._nbins_eval ** ndim
             points = np.empty((n_resample, ndim))
             for i in range(0, ndim):
                 points[:,i] = coords[i].ravel()
             weights = interp(points)
-            density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+            ##no longer take the transpose of ND histogram
+            #density = self.NDhistogram(points, weights, ranges, nbins=self._nbins_eval).T
+            '''
+            '''
+            for the non-random re-sampling supposedly map_coordinates is much faster than regular grid interpolator. 
+            I think it's what's used in lenstronomy a lot.
+            there are 2 options, 
+            i) One keeps the total probability conserved-> it says that the probability density in a bin is
+            subdivided evenly among all of the sub bins -> i.e. if there are 9 total counts then the 3x3 bin each get 1 of the counts "sharing_interp"
+            this will most accurately recover the probability distribution from an operation of sub-sampling then re-binning we can look at both.
+            ii) One approximates the density field with the linear approximation, allows the probability density to vary across each bin.
+            this is more correct if there are high bin-to-bin gradients.
+            '''
+            factor = self._nbins_eval/self._nbins
+            if self._sharing_interp:
+                density = self.sharing_is_caring(values, factor)
+
+
+            else:
+                coords_1d = []
+
+                for i in range(0, ndim):
+                    ##starting image has 5 bins- so pixel values are 0, 1, 2, 3, 4, 5
+                    coord = np.arange(self._nbins_eval, dtype=float) / factor
+                    ## final image has 15 bins- so pixel values are (0, 1, 2, 3, 4, ...15)/3 ->still goes from 1 to 5 but now has intermediate values
+                    coords_1d.append(coord)
+
+                coords_nd = np.meshgrid(*coords_1d, indexing="ij")  # list of ND arrays
+
+                density = ndimage.map_coordinates(
+                    values,
+                    coords_nd,  # list: one array per axis
+                    order=1,  # 0 = nearest, 1 = linear, 3 = cubic …
+                    mode="reflect"  # mirror outside the edge
+                )
+
+
         return density
 
 
@@ -171,8 +272,9 @@ class KDE(PointInterp):
             histbins.append(np.linspace(ranges[i][0], ranges[i][-1], len(coord) + 1))
 
         # Compute the N-dimensional histogram
-        H = self.NDhistogram(data, weights, ranges)
-
+        ##This now needs to have the transpose since we are not returning the transpose by default
+        H_T, t_bins, t_cens = self.NDhistogram(data, weights, ranges)
+        H = H_T.T
         # compute the covariance, scale KDE kernel size by the bandwidth_scale parameter
         if weights is not None:
             normed_weights = weights / np.max(weights)
@@ -204,7 +306,8 @@ class KDE(PointInterp):
             edge_kernel = BoundaryCorrection(gaussian_kernel)
             renormalization = edge_kernel.first_order_correction
             density *= renormalization ** -1
-        return density
+        ##take the transpose of the output so that it's the original coordinates.
+        return density.T
 
 class BoundaryCorrection(object):
 
