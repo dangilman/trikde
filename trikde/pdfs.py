@@ -4,19 +4,25 @@ from trikde.kde import BoundaryCorrection
 from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
-
+import copy
 class InterpolatedLikelihood(object):
     """
     This class interpolates a likelihood, and returns a probability given a point in parameter space
     """
     def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False):
 
-        self.density = independent_densities.density.T
+        self.density = independent_densities.local_density
         self.param_names, self.param_ranges = param_names, param_ranges
         nbins = np.shape(self.density)[0]
-        points = []
+        bin_centers = []
         for ran in param_ranges:
-            points.append(np.linspace(ran[0], ran[-1], nbins))
+            #edges.append(np.linspace(ran[0], ran[-1], nbins))
+            bin_edges = np.linspace(ran[0], ran[-1], nbins+1)
+            bin_cens = (bin_edges[:-1] + bin_edges[1:])/2
+            bin_centers.append(bin_cens)
+        print(bin_centers)
+
+
         if extrapolate:
             kwargs_interpolator = {'bounds_error': False, 'fill_value': None}
         else:
@@ -24,7 +30,7 @@ class InterpolatedLikelihood(object):
 
         self._extrapolate = extrapolate
 
-        self.interp = RegularGridInterpolator(points, self.density, **kwargs_interpolator)
+        self.interp = RegularGridInterpolator(bin_centers, self.density, **kwargs_interpolator)
 
     def sample(self, n, nparams=None, pranges=None, print_progress=True):
 
@@ -128,9 +134,22 @@ class IndependentLikelihoods(object):
         """
         if not isinstance(density_samples_list, list):
             raise Exception('must pass in a list of DensitySamples instances.')
+
         self.densities = density_samples_list
         self.param_names = density_samples_list[0].param_names
         self.param_ranges = density_samples_list[0].param_ranges
+        ##updating this from a method to a variable so that the product is only taken one time and stored.
+        ###local density is the density value that was previoulsy returned from the product function.
+        self.local_density=None
+        self.transpose_density = None
+
+        if len(self.densities) == 1:
+            self.local_density = self.densities[0].density
+        else:
+            self.local_density = self.get_product()
+        ## the plotting functions all expect to get the transpose, so any local_density calculations need to also update the transpose.
+        self.transpose_density = (self.local_density).T
+
 
     def __mul__(self, other):
         density = self.densities + other.densities
@@ -145,9 +164,9 @@ class IndependentLikelihoods(object):
 
     def __truediv__(self, other):
         # here we want to divide this pdf
-        self_pdf = self.density
+        self_pdf = self.local_density
         # by this one
-        other_pdf = other.density
+        other_pdf = other.local_density
         # there we go...
         density = self_pdf / other_pdf
         # now we want to create a new DensitySamples class with this histogram/kde representation of the data
@@ -156,7 +175,69 @@ class IndependentLikelihoods(object):
                                             self.param_ranges)
         return IndependentLikelihoods([pdf])
 
-    @property
+    def get_product(self):
+        #if not hasattr(self, '_product'):
+        prod = 1
+        for di in self.densities:
+            prod *= di.density
+        prod /= np.max(prod)
+        return prod
+
+    def rebin_density(self, rebin_factor):
+        #rebin_factor-> sub-sample number of bins.
+
+        ##also shamelessly copied from chat gpt, only works if all dimensions are sub-sampled the same amount which applies to us.
+        ##this is using some numpy witchraft... copying the example for a 2x2 for posterity, down-sampling from 6x6 to 3x3
+        '''
+        [[ 0  1  2  3  4  5]
+        [ 6  7  8  9 10 11]
+        [12 13 14 15 16 17]
+        [18 19 20 21 22 23]
+        [24 25 26 27 28 29]
+        [30 31 32 33 34 35]]
+        tmp = arr.reshape( 2, 3, 2, 3 )
+
+        axis0  axis1     axis2  axis3
+        coarse  sub‑row    coarse  sub‑col
+        2        3          2        3
+        [[[[ 0  1  2]   [ 3  4  5]]
+        [[ 6  7  8]   [ 9 10 11]]
+        [[12 13 14]   [15 16 17]]]
+
+        [[[18 19 20]   [21 22 23]]
+        [[24 25 26]   [27 28 29]]
+        [[30 31 32]   [33 34 35]]]]
+
+        result = tmp.sum(axis=(1, 3))   #  ← only now do we add numbers
+
+        axis 1 collapses the three sub‑rows ([[0 1 2] …] + [[6 7 8] …] + [[12 13 14] …])
+        axis3 collapses the three sub‑cols inside each coarse col.
+
+        result:
+        [[ 63  90]
+        [225 252]]
+        Block made of 'high resolution' row elements 0->2 and column elements 0->2 gives: 0+1+2+6+7+8+12+13+14 = 63
+
+        '''
+
+        factor = int(rebin_factor)
+        new_shape = []
+        high_res = copy.deepcopy(self.local_density)
+        for s in high_res.shape:
+            if s % factor:
+                raise ValueError("shape not divisible by factor")
+            new_shape.extend([s // factor, factor])
+
+        tmp = high_res.reshape(new_shape)
+        axes = tuple(range(1, len(new_shape), 2))  # sum over every 2nd axis
+        odensity = tmp.sum(axis=axes)
+        pdf = DensitySamples.from_histogram(odensity,
+                                            self.param_names,
+                                            self.param_ranges)
+        return IndependentLikelihoods([pdf])
+
+    '''@property
+    ###turned this into a class variable so it only needs to be calculated one time.
     def density(self):
 
         if not hasattr(self, '_product'):
@@ -167,7 +248,7 @@ class IndependentLikelihoods(object):
             self._product = prod
 
         return self._product
-
+    '''
     def projection_1D(self, pname):
 
         """
@@ -184,7 +265,7 @@ class IndependentLikelihoods(object):
             if pname != name:
                 sum_inds.append(len(self.param_names) - (i + 1))
 
-        projection = np.sum(self.density, tuple(sum_inds))
+        projection = np.sum(self.transpose_density, tuple(sum_inds))
 
         return projection
 
@@ -212,7 +293,7 @@ class IndependentLikelihoods(object):
                 tpose = True
                 break
 
-        projection = np.sum(self.density, tuple(sum_inds))
+        projection = np.sum(self.transpose_density, tuple(sum_inds))
         if tpose:
             projection = projection.T
 
@@ -246,6 +327,7 @@ class MultivariateNormalPriorHyperCube(object):
 
         self.param_names = param_names
         self.param_ranges = param_ranges
+        ##why are we taking the transpose of histogram dd here??
         self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0].T
 
     @property
@@ -274,7 +356,8 @@ class CustomPriorHyperCube(object):
         weights = np.exp(-0.5 * chi_square_function(samples, **kwargs_weight_function))
         self.param_names = param_names
         self.param_ranges = param_ranges
-        self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0].T
+        ##remove the transpose
+        self.density = np.histogramdd(samples, range=param_ranges, bins=nbins, weights=weights)[0]#.T
 
         self.renormalization = np.ones_like(self.density)
 
@@ -344,7 +427,7 @@ class DensitySamples(object):
     """
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
                  nbins=12, use_kde='LINEAR', samples_width_scale=3, density=None,
-                 nbins_eval=None, resampling=True, n_resample=1000000):
+                 nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp = False):
 
         """
 
@@ -388,7 +471,8 @@ class DensitySamples(object):
                 estimator = LinearKDE(nbins,
                                       nbins_eval,
                                       resampling=resampling,
-                                      n_resample=n_resample)
+                                      n_resample=n_resample,
+                                      sharing_interp=sharing_interp)
             elif use_kde is False or use_kde is None:
                 # we still use the NDHistogram
                 estimator = KDE(bandwidth_scale, nbins)
@@ -403,7 +487,11 @@ class DensitySamples(object):
             if use_kde:
                 self.density = estimator(data, self.param_ranges, weights)
             else:
-                self.density = estimator.NDhistogram(data, weights, self.param_ranges)
+                ##this was returning a transpose... now it's not.
+                #self.density,bin_edges,bin_cens = estimator.NDhistogram(data, weights, self.param_ranges)
+                dens,bin_edges,bin_cens = estimator.NDhistogram(data, weights, self.param_ranges)
+                #self.density = dens.T
+                self.density=dens
         self.density /= np.max(self.density)
 
     def __add__(self, other):
