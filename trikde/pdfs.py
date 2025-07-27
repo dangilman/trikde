@@ -5,23 +5,32 @@ from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
 import copy
+from scipy.integrate import simpson
+
+
+
 class InterpolatedLikelihood(object):
     """
     This class interpolates a likelihood, and returns a probability given a point in parameter space
     """
-    def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False):
 
-        self.density = independent_densities.local_density
-        self.param_names, self.param_ranges = param_names, param_ranges
-        nbins = np.shape(self.density)[0]
+    def get_bins(self, nbins):
         bin_centers = []
-        for ran in param_ranges:
+
+        for ran in self.param_ranges:
             #edges.append(np.linspace(ran[0], ran[-1], nbins))
             bin_edges = np.linspace(ran[0], ran[-1], nbins+1)
             bin_cens = (bin_edges[:-1] + bin_edges[1:])/2
             bin_centers.append(bin_cens)
-        print(bin_centers)
+        return bin_centers
 
+    def __init__(self, independent_densities, param_names, param_ranges, extrapolate=True):
+
+        self.density = independent_densities.local_density
+        self.param_names, self.param_ranges = param_names, param_ranges
+
+        self.nbins = np.shape(self.density)[0]
+        bin_centers = self.get_bins(self.nbins)
 
         if extrapolate:
             kwargs_interpolator = {'bounds_error': False, 'fill_value': None}
@@ -109,6 +118,124 @@ class InterpolatedLikelihood(object):
         for point in point_list:
             f.append(self(point))
         return np.array(f)
+
+    def project_onto_axis(self,final_axis_index,nbins, method='simps',normalize=True, eval_points = None):
+        """
+        Projects the posterior volume onto a 1D final axis to get the marginal distribution for final_axis_index parameter
+        Currently integrates over the entire prior on the other axes.
+        :param final_axis_index: index of the axis to project onto (int)
+        :param nbins: number of points to divide each axis into. Assumes the same for all three. Could be changed if desired.
+        """
+        bin_centers = self.get_bins(nbins)
+
+        #in principle final points could be anything along the dimension, but let's just keep it the same resolution as the other points.
+        if eval_points is None:
+            eval_points = bin_centers[final_axis_index]
+
+
+        projected_values = self.integrate_projection(bin_centers, final_axis_index, eval_points, method=method, normalize=normalize)
+        return eval_points, projected_values
+
+    def integrate_projection(self, all_bin_centers, project_axis, eval_points, method='simps', normalize=True):
+
+        interpolator=self.interp
+
+
+
+        ndim = len(all_bin_centers)
+        axes_to_integrate = []
+        for i in range(ndim):
+            if i != project_axis:
+                axes_to_integrate.append(i)
+
+        integration_grids = []
+
+        for axis in axes_to_integrate:
+            integration_grids.append(all_bin_centers[axis])
+
+        ##we are making an array of all the possible coordinate combinations that will be integrated over. E.g. if
+        # projecting y and z onto x, this is a combination of all yz values that we will evaluate.
+        mesh = np.meshgrid(*integration_grids, indexing='ij')
+        flat_coords = []
+
+        for m in mesh:
+            flat_coords.append(m.ravel())
+
+        num_eval = len(eval_points)
+        num_grid = flat_coords[0].shape[0]
+
+        ##inputs is going to be dimensions: 1D number of points along the axis (e.g. bin center number).
+        # #total number of grid points in ND, #number of dimensions
+        ## so for each dimension:
+        # if it's the final dimension to project onto, each row is the dimension value repeated n_y*n_z times, so we can put this in
+        # the interpolator for the x coordinate as we project along the other dimensions in our integration for that x coordinate.
+
+        ##if it's one of the axes we're integrating over, it gives the array of points in that dimension to integrate over
+        ##num_eval (x points) blocks of size (num total grid points, num grid points -> you need to integrate over every y, z combination of points for each x position).
+        inputs = np.empty((num_eval, num_grid, ndim))
+        coord_index = 0
+        for dim in range(ndim):
+            if dim == project_axis:
+                ##replicates the axis to project onto (the remaining final axis) by making num grid copies of the axis.
+                ##if we are in the dimension to project onto, the first two dimensions will be repeats of the eval points
+                ## if eval_points = [0.1, 0.5] (points where we will have the final projection on the projected dimension.
+                # np.repeat(eval_points[:, np.newaxis], num_grid, axis=1)
+                #
+                # # Result:
+                # # [[0.1 0.1 0.1]
+                # #  [0.5 0.5 0.5]]
+
+                inputs[:, :, dim] = np.repeat(eval_points[:, np.newaxis], num_grid, axis=1)
+            else:
+                # repeats the dimension to be integrated over one time for every coordinate in the non-integrated array.
+                ##e.g. if integrating over y for 2 x coordinates gives [all yvals],[all yvals], so we can integrate [yvals] for each x position.
+                ##NB this integration method always integrates over all values in the other 2 dimensions. This can be adjusted by changing eval points.
+                ##flat_coords[coord_index] = np.array([10, 20, 30]), num_eval = 2
+                ## np.tile([10, 20, 30], (2, 1))
+                # [[10, 20, 30],
+                #  [10, 20, 30]]
+                ## nb, we are incrementing across the integration dimension coordinates for each value of the final projection coordinates.
+                inputs[:, :, dim] = np.tile(flat_coords[coord_index], (num_eval, 1))
+
+                coord_index += 1
+                ##update the coordinate index, indicating we have added one of the 'integration coordinate' grids of points.
+
+        inputs_flat = inputs.reshape(-1, ndim)
+
+        values_flat = interpolator(inputs_flat)
+
+        values = values_flat.reshape(num_eval, *mesh[0].shape)
+
+        result = values
+        ##looping over each coordinate position along the axis that will be the final projected axis. (e.g. if projecting y and z onto x this is each x grid point).
+        #the reverse integration ensures that the meaning of the coordinate indices in result are conserved (e.g. 0,1,2 above, becomes 0,1 after integration.)
+        for i in range(len(axes_to_integrate) - 1, -1, -1):
+            axis_vals = all_bin_centers[axes_to_integrate[i]]
+
+            if method == 'simps':
+                ##x is the values where you're computing the integration. e.g. over all the y values.
+                # Note that you pass in result from the previous step. so that each time you are reducing the full array by one dimension.
+                ## simpson doesn't have any knowledge of the interpolation function, it just integrates over the last dimension of result array (values), you have to tell it what the
+                ## physical coordinate spacing was of that coordinate (axis_vals) so it can do the integration.
+
+                result = simpson(result, axis=-1, x=axis_vals)
+            elif method == 'trapz':
+                result = np.trapz(result, axis=-1, x=axis_vals)
+            else:
+                raise ValueError("Unsupported integration method")
+
+        if normalize:
+            if method == 'simps':
+                norm = simpson(result, x=eval_points)
+            else:
+                norm = np.trapz(result, x=eval_points)
+            if norm != 0:
+                result /= norm
+
+        return result
+
+
+
 
 class GaussianWeight(object):
 
@@ -572,6 +699,7 @@ def likelihood_function_change(like1, like2, param_ranges, n_draw=50000, nbins=5
     :return: the relative difference in the likelihood functions, the likelihoods themselves, and the
     total change per bin
     """
+    print('WARNING THIS PROBABLY HAS TRANSPOSE ERRORS, I DIDNT CHECK THAT THIS WORKS')
     from trikde.pdfs import InterpolatedLikelihood
     param_names = ['param1', 'param2']
     interp1 = InterpolatedLikelihood(like1, param_names, param_ranges)
