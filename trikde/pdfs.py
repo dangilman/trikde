@@ -125,6 +125,11 @@ class InterpolatedLikelihood(object):
         Currently integrates over the entire prior on the other axes.
         :param final_axis_index: index of the axis to project onto (int)
         :param nbins: number of points to divide each axis into. Assumes the same for all three. Could be changed if desired.
+        :param method: integration method either simps or trapz
+        :param normalize: whether or not to normalize the posterior distribution
+        :param eval_points: if not None, will evaluate the posterior distribution at the points determined by nbins divided over param ranges
+
+        Returns the marginal distribution as a 1D array of values, along the points that it was evaluated at.
         """
         bin_centers = self.get_bins(nbins)
 
@@ -137,10 +142,19 @@ class InterpolatedLikelihood(object):
         return eval_points, projected_values
 
     def integrate_projection(self, all_bin_centers, project_axis, eval_points, method='simps', normalize=True):
+        """
+        Does the n-d integration given an interpolator object, returns the marginal distribution along one axis
+        :param all_bin_centers: the bins to project onto (list)
+        :param project_axis: the axis to project onto (int)
+        :eval_points: the points to evaluate (list) this is where the marginal distribution will be evaluated
+        :param method: integration method either simps or trapz
+        :param normalize: whether or not to normalize the posterior distribution
+
+        Return the marginal distribution as a 1D array of values, along the points that it was evaluated at.
+        """
+
 
         interpolator=self.interp
-
-
 
         ndim = len(all_bin_centers)
         axes_to_integrate = []

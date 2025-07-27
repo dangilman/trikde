@@ -101,10 +101,13 @@ class LinearKDE(PointInterp):
     def __init__(self, nbins, nbins_eval, resampling=True, n_resample=100000, sharing_interp = False):
         """
 
-        :param nbins:
-        :param nbins_eval:
-        :param resampling:
-        :param n_resample:
+        :param nbins: number of bins to estimate the pdf originally
+        :param nbins_eval: final number of bins to evaluate the pdf on
+        :param resampling: if True, randomly draws from a linear interpolation of the nbins points, and then re-bins on n_eval bins
+                          if False, default is a map coordinates interpolation of nbins, evaluated at n_eval bins
+        :param n_resample: number of points to resample the pdf, used if resampling True
+        :param sharing_interp: used if resampling is False, divides probability evenly onto subsampled pixels returns final
+        resolution of nbins_eval
         """
         self._nbins_eval = nbins_eval
         self._resampling = resampling
