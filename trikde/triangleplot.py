@@ -161,12 +161,17 @@ class TrianglePlot(object):
             contour_colors = self._highc_contour_colors
         self._auto_scale = []
 
+        if not isinstance(contour_alpha, list):
+            contour_alpha = [contour_alpha] * int(self._nchains)
         for i in range(self._nchains):
-
-            axes.append(self._make_triplot_i(axes, i, contour_colors, contour_levels, filled_contours, contour_alpha,
-                                             fig_size, truths, tick_label_font=tick_label_font,
+            axes.append(self._make_triplot_i(axes, i, contour_colors, contour_levels, filled_contours,
+                                             contour_alpha[i],
+                                             fig_size, truths,
+                                             tick_label_font=tick_label_font,
                                              xtick_label_rotate=xtick_label_rotate,
-                                             axis_label_font=axis_label_font, cmap=self.cmap_call, show_contours=show_contours,
+                                             axis_label_font=axis_label_font,
+                                             cmap=self.cmap_call,
+                                             show_contours=show_contours,
                                              show_intervals=show_intervals,
                                              display_params=display_params))
 

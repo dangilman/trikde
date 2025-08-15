@@ -2,9 +2,7 @@ import numpy as np
 from scipy.signal import fftconvolve
 from scipy.interpolate import RegularGridInterpolator
 from scipy import ndimage
-
 import numpy as np
-
 
 
 class PointInterp(object):
@@ -175,11 +173,8 @@ class LinearKDE(PointInterp):
             factor = self._nbins_eval/self._nbins
             if self._sharing_interp:
                 density = self.sharing_is_caring(values, factor)
-
-
             else:
                 coords_1d = []
-
                 for i in range(0, ndim):
                     ##starting image has 5 bins- so pixel values are 0, 1, 2, 3, 4, 5
                     coord = np.arange(self._nbins_eval, dtype=float) / factor
@@ -194,10 +189,7 @@ class LinearKDE(PointInterp):
                     order=1,  # 0 = nearest, 1 = linear, 3 = cubic …
                     mode="reflect"  # mirror outside the edge
                 )
-
-
         return density
-
 
 class KDE(PointInterp):
     """
@@ -219,7 +211,7 @@ class KDE(PointInterp):
         self._use_cov = use_cov
         super(KDE, self).__init__(nbins)
 
-    def _scotts_factor(self, n, d):
+    def _scotts_bandwidth(self, n, d):
 
         """
         Implements the kernel bandwidth using Scotts factor
@@ -228,6 +220,16 @@ class KDE(PointInterp):
         :return: kernel bandwidth
         """
         return 1.05 * n ** (-1. / (d + 4))
+
+    def _silverman_bandwidth(self, n, d):
+
+        """
+        Implements the kernel bandwidth using Silverman's factor
+        :param n: number of data points
+        :param d: number of dimensions
+        :return: kernel bandwidth
+        """
+        return (n * (d + 2) / 4.) ** (-1. / (d + 4))
 
     @staticmethod
     def _gaussian_kernel(inverse_cov_matrix, coords_centered, dimension, n_reshape):
@@ -281,8 +283,8 @@ class KDE(PointInterp):
             effective_sample_size = np.sum(normed_weights)
         else:
             effective_sample_size = data.shape[0]
-        bandwidth = self.bandwidth_scale * self._scotts_factor(effective_sample_size, dimension)
-        covariance = bandwidth * np.cov(data.T)
+        bandwidth = self.bandwidth_scale * self._scotts_bandwidth(effective_sample_size, dimension)
+        covariance = bandwidth ** 2 * np.cov(data.T)
         if self._use_cov is False:
             covariance *= np.eye(dimension)
         # invert covariance matrix

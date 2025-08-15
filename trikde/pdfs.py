@@ -5,6 +5,8 @@ from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
 import copy
+import h5py
+
 class InterpolatedLikelihood(object):
     """
     This class interpolates a likelihood, and returns a probability given a point in parameter space
@@ -20,8 +22,6 @@ class InterpolatedLikelihood(object):
             bin_edges = np.linspace(ran[0], ran[-1], nbins+1)
             bin_cens = (bin_edges[:-1] + bin_edges[1:])/2
             bin_centers.append(bin_cens)
-        print(bin_centers)
-
 
         if extrapolate:
             kwargs_interpolator = {'bounds_error': False, 'fill_value': None}
@@ -93,8 +93,8 @@ class InterpolatedLikelihood(object):
                     raise Exception('point was out of bounds: ', point)
 
         p = float(self.interp(point))
-        if p>1:
-            print('warning: p>1, possibly due to extrapolation')
+        # if p>1:
+        #     print('warning: p>1, possibly due to extrapolation')
         return min(1., max(p, 0.))
 
     def call_at_points(self, point_list):
@@ -150,6 +150,29 @@ class IndependentLikelihoods(object):
         ## the plotting functions all expect to get the transpose, so any local_density calculations need to also update the transpose.
         self.transpose_density = (self.local_density).T
 
+    @classmethod
+    def from_hdf5(cls, filename, param_names, param_ranges):
+        """
+        Create the class from an HDF5 file that contains a list "densities", which contains the likelihood in ndim dimensions
+        i.e. each shape = (nbins, nbins, nbins, ....) and len(shape) = ndim
+        :param filename: path to the HDF5 file
+        :return: instance of the class
+        """
+        with h5py.File(filename, "r") as f:
+            density = np.array(f['density'])
+        pdf = DensitySamples.from_histogram(density, param_names, param_ranges)
+        return IndependentLikelihoods([pdf])
+
+    def write_to_hdf5(self, filename):
+        """
+        Create the class from an HDF5 file that contains a parameter "local_density", which is the likelihood in ndim dimensions
+        i.e. shape = (nbins, nbins, nbins, ....) and len(shape) = ndim
+        :param filename: path to the HDF5 file
+        :return: instance of the class
+        """
+        h = h5py.File(filename, mode='w')
+        dataset = h.create_dataset(name='density', data=self.local_density)
+        return
 
     def __mul__(self, other):
         density = self.densities + other.densities
@@ -236,19 +259,6 @@ class IndependentLikelihoods(object):
                                             self.param_ranges)
         return IndependentLikelihoods([pdf])
 
-    '''@property
-    ###turned this into a class variable so it only needs to be calculated one time.
-    def density(self):
-
-        if not hasattr(self, '_product'):
-            prod = 1
-            for di in self.densities:
-                prod *= di.density
-            prod /= np.max(prod)
-            self._product = prod
-
-        return self._product
-    '''
     def projection_1D(self, pname):
 
         """
