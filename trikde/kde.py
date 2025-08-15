@@ -1,4 +1,5 @@
 import numpy as np
+from notebooks.sidm_analysis.analyze_sims import bandwidth
 from scipy.signal import fftconvolve
 from scipy.interpolate import RegularGridInterpolator
 from scipy import ndimage
@@ -283,10 +284,12 @@ class KDE(PointInterp):
             effective_sample_size = np.sum(normed_weights)
         else:
             effective_sample_size = data.shape[0]
-        bandwidth = self.bandwidth_scale * self._scotts_bandwidth(effective_sample_size, dimension)
-        covariance = bandwidth ** 2 * np.cov(data.T)
+        bandwidth = self.bandwidth_scale * self._silverman_bandwidth(effective_sample_size, dimension)
         if self._use_cov is False:
-            covariance *= np.eye(dimension)
+            covariance = bandwidth ** 2 * np.std(data, axis=0) ** 2
+        else:
+            covariance = bandwidth ** 2 * np.cov(data.T)
+
         # invert covariance matrix
         if dimension > 1:
             c_inv = np.linalg.inv(covariance)
