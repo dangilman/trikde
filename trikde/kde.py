@@ -1,5 +1,4 @@
 import numpy as np
-from notebooks.sidm_analysis.analyze_sims import bandwidth
 from scipy.signal import fftconvolve
 from scipy.interpolate import RegularGridInterpolator
 from scipy import ndimage
