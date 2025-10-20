@@ -197,19 +197,31 @@ class KDE(PointInterp):
     at the boundary of parameter space
     """
 
-    def __init__(self, bandwidth_scale=1, nbins=None, boundary_order=1, use_cov=True):
+    def __init__(self, bandwidth_scale=1, nbins=None, boundary_order=1, force_bandwidth=None, use_cov=True):
 
         """
         Gaussian kernel density estimator with first-order boundary correction
         :param bandwidth_scale: scales the bandwidth of the kernel density estimator relative to Scott's factor value
         :param nbins: number of bins for output pdf
         :param boundary_order: 1 (first order) or 0 (no correction)
+        :param force_bandwidth: optionally set the bandwidth along each axis; otherwise, it is chosen based on
+        Silvermanns's rule. force_bandwidth can be a function
         :param use_cov: bool; use the covariance matrix of samples to define the Gaussian kernels
         """
         self.bandwidth_scale = bandwidth_scale
         self._boundary_order = boundary_order
         self._use_cov = use_cov
+        self._force_bandwidth = force_bandwidth
+        self._kde_bandwidth = None
         super(KDE, self).__init__(nbins)
+
+    @property
+    def kde_bandwidth(self):
+        """
+        Return the kde bandwidth, if it has been evaluated
+        :return:
+        """
+        return self._kde_bandwidth
 
     def _scotts_bandwidth(self, n, d):
 
@@ -283,9 +295,16 @@ class KDE(PointInterp):
             effective_sample_size = np.sum(normed_weights)
         else:
             effective_sample_size = data.shape[0]
-        bandwidth = self.bandwidth_scale * self._silverman_bandwidth(effective_sample_size, dimension)
+        if self._force_bandwidth is None:
+            bandwidth = self.bandwidth_scale * self._silverman_bandwidth(effective_sample_size, dimension)
+        else:
+            if callable(self._force_bandwidth):
+                bandwidth = self._force_bandwidth(effective_sample_size, dimension)
+            else:
+                bandwidth = float(self._force_bandwidth)
+        self._kde_bandwidth = bandwidth
         if self._use_cov is False:
-            covariance = bandwidth ** 2 * np.std(data, axis=0) ** 2
+            covariance = np.eye(dimension) * bandwidth ** 2 * np.std(data, axis=0) ** 2
         else:
             covariance = bandwidth ** 2 * np.cov(data.T)
 

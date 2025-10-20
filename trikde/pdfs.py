@@ -11,7 +11,8 @@ class InterpolatedLikelihood(object):
     """
     This class interpolates a likelihood, and returns a probability given a point in parameter space
     """
-    def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False):
+    def __init__(self, independent_densities, param_names, param_ranges, extrapolate=False,
+                 fill_value=None):
 
         self.density = independent_densities.local_density
         self.param_names, self.param_ranges = param_names, param_ranges
@@ -24,13 +25,24 @@ class InterpolatedLikelihood(object):
             bin_centers.append(bin_cens)
 
         if extrapolate:
-            kwargs_interpolator = {'bounds_error': False, 'fill_value': None}
+            kwargs_interpolator = {'bounds_error': False, 'fill_value': fill_value}
         else:
             kwargs_interpolator = {}
 
         self._extrapolate = extrapolate
 
         self.interp = RegularGridInterpolator(bin_centers, self.density, **kwargs_interpolator)
+
+    def generate_uniform_samples(self, num_points):
+        """
+        Generates samples uniformly within the specified parameter ranges
+        :param num_points: number of samples to generate
+        :return: samples and weights
+        """
+        points = np.empty((num_points, len(self.param_ranges)))
+        for i in range(0, len(self.param_ranges)):
+            points[:, i] = np.random.uniform(self.param_ranges[i][0], self.param_ranges[i][1], num_points)
+        return points
 
     def sample(self, n, nparams=None, pranges=None, print_progress=True):
 
@@ -74,41 +86,53 @@ class InterpolatedLikelihood(object):
 
         return samples
 
-    def __call__(self, point):
+    def __call__(self, point, parallel=False, n_cpu=10):
 
         """
-        Evaluates the liklihood at a point in parameter space
+        Evaluates the likelihood at a point in parameter space
         :param point: a tuple with length equal to len(param_names) that contains a point in parameter space, param ordering
-        between param_names, param_ranges, and in point must be the same
-
-        Returns the likelihood
+        between param_names, param_ranges, and in point must be the same. If parallel=True, point can be a numpy array
+        of shape (N, len(param_names))
+        :param parallel: bool; if True, evaluate the likelihood using multi-processing
+        :param n_cpu: number of cpus to use in parallel with parallel=True
+        Returns the likelihood evaluated at each point
         """
-        point = np.array(point)
-        for i, value in enumerate(point):
-            if value is None:
-                new_point = np.random.uniform(self.param_ranges[i][0], self.param_ranges[i][1])
-                point[i] = new_point
-            elif value < self.param_ranges[i][0] or value > self.param_ranges[i][1]:
-                if self._extrapolate is False:
-                    raise Exception('point was out of bounds: ', point)
-
-        p = float(self.interp(point))
-        # if p>1:
-        #     print('warning: p>1, possibly due to extrapolation')
-        return min(1., max(p, 0.))
+        if parallel:
+            point_arrays = np.array_split(point, int(n_cpu))
+            with Pool(processes=n_cpu) as pool:
+                weights = pool.map(self.call_at_points, point_arrays)
+            weights = np.squeeze(np.concatenate(weights))
+            return weights
+        else:
+            point = np.array(point)
+            for i, value in enumerate(point):
+                if value is None:
+                    new_point = np.random.uniform(self.param_ranges[i][0], self.param_ranges[i][1])
+                    point[i] = new_point
+                elif value < self.param_ranges[i][0] or value > self.param_ranges[i][1]:
+                    if self._extrapolate is False:
+                        raise Exception('point was out of bounds: ', point)
+            p = float(self.interp(point))
+            return p
 
     def call_at_points(self, point_list):
 
         """
-        Evaluates the liklihood at a set of points in parameter space
-        :param point_list: a list of tuples at which to evaluate likelihood
+        Evaluates the likelihood at a set of points in parameter space
+        :param point_list: a list or numpy array of points at which to evaluate likelihood
 
         Returns the likelihood
         """
+
         f = []
-        for point in point_list:
-            f.append(self(point))
-        return np.array(f)
+        if isinstance(point_list, list):
+            for point in point_list:
+                f.append(self(point))
+        else:
+            f = np.empty(point_list.shape[0])
+            for i in range(0, point_list.shape[0]):
+                f[i] = float(self(tuple(point_list[i,:])))
+        return np.squeeze(f)
 
 class GaussianWeight(object):
 
@@ -149,6 +173,60 @@ class IndependentLikelihoods(object):
             self.local_density = self.get_product()
         ## the plotting functions all expect to get the transpose, so any local_density calculations need to also update the transpose.
         self.transpose_density = (self.local_density).T
+
+    def project_out_dimensions(self, param_name_list):
+        """
+        Takes an instance of this class, and creates a new one projecting out only those dimensions corresponding to
+        the parameters in param_names
+        :param independent_likelihood: an instance of IndependentLikelihoods
+        :param param_name_list: a list of strings specifying the dimensions to project out
+        :return: a new instance of IndependentLikelihoods
+        """
+        if len(param_name_list) == 0:
+            return self
+        for i, param_name in enumerate(param_name_list):
+            if i==0:
+                pdf = self._project_out_dimension(self, param_name)
+            else:
+                pdf = self._project_out_dimension(pdf, param_name)
+        return pdf
+
+    def _project_out_dimension(self, independent_likelihood, param):
+        """
+        Takes an instance of this class, and creates a new one projecting out only those dimensions corresponding to
+        the parameters in param_names
+        :param independent_likelihood: an instance of IndependentLikelihoods
+        :param param: a string specifying the parameter to project out
+        :return: a new instance of IndependentLikelihoods
+        """
+        if param not in independent_likelihood.param_names:
+            raise ValueError('parameter '+param+' not found in the IndepedentLikelihoods class')
+        index = independent_likelihood.param_names.index(param)
+        density = np.sum(independent_likelihood.local_density, axis=index)
+        density = density / np.max(density)
+        param_names = []
+        param_ranges = []
+        for param_name, prange in zip(independent_likelihood.param_names, independent_likelihood.param_ranges):
+            if param_name == param:
+                pass
+            else:
+                param_names.append(param_name)
+                param_ranges.append(prange)
+
+        pdf = DensitySamples.from_histogram(density, param_names, param_ranges)
+        return IndependentLikelihoods([pdf])
+
+    @property
+    def kde_bandwidth(self):
+        """
+        Return the kde bandwith of the DensitySamples classes; if multiple density samples classes are provided, will return a list
+        :return:
+        """
+        if len(self.densities) == 1:
+            return self.densities[0].kde_bandwidth
+        else:
+            out = [den.kde_bandwidth for den in self.densities]
+            return out
 
     @classmethod
     def from_hdf5(cls, filename, param_names, param_ranges):
@@ -436,8 +514,9 @@ class DensitySamples(object):
     This class combins several instances of SingleDensity, that are combined by averaging
     """
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
-                 nbins=12, use_kde='LINEAR', samples_width_scale=3, density=None,
-                 nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp = False):
+                 nbins=12, use_kde='GAUSSIAN', samples_width_scale=3, density=None,
+                 nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp=False,
+                 boundary_order=1, force_bandwidth=None):
 
         """
 
@@ -457,8 +536,11 @@ class DensitySamples(object):
         :param resampling: when using LINEAR kde, specifies whether the final pdf is obtained from resampling the prior
         and weighting by interpolation function
         :param n_resample: the number of points to draw when resampling
+        :param sharing_interp:
+        :param boundary_order: if 1, performs a first-order boundary correction for the KDE
         """
         if density is not None:
+            self._kde_bandwidth = None
             self.density = density
             assert param_ranges is not None, 'When specifying the density directly, must also provide the parameter ranges ' \
                                              'along each dimension'
@@ -472,9 +554,9 @@ class DensitySamples(object):
                                 'size (n_observations, n_dimensions)')
 
             if use_kde == 'GAUSSIAN':
-                estimator = KDE(bandwidth_scale, nbins)
+                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth)
             elif use_kde == 'GAUSSIAN_NO_COV':
-                estimator = KDE(bandwidth_scale, nbins, use_cov=False)
+                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth, use_cov=False)
             elif use_kde == 'LINEAR':
                 if nbins_eval is None:
                     nbins_eval = nbins
@@ -496,13 +578,33 @@ class DensitySamples(object):
             self.param_names = param_names
             if use_kde:
                 self.density = estimator(data, self.param_ranges, weights)
+                self._kde_bandwidth = estimator.kde_bandwidth
             else:
                 ##this was returning a transpose... now it's not.
                 #self.density,bin_edges,bin_cens = estimator.NDhistogram(data, weights, self.param_ranges)
                 dens,bin_edges,bin_cens = estimator.NDhistogram(data, weights, self.param_ranges)
                 #self.density = dens.T
                 self.density=dens
+                self._kde_bandwidth = None
+        self._weights = weights
         self.density /= np.max(self.density)
+
+    @property
+    def kde_bandwidth(self):
+        """
+        Return the kde bandwidth if it has been evaluated
+        :return:
+        """
+        return self._kde_bandwidth
+
+    @property
+    def effective_sample_size(self):
+        """
+        Returns the effective sample size, defined as the num of the weights
+        :return:
+        """
+        weights_normalized = self._weights / np.max(self._weights)
+        return np.sum(weights_normalized)
 
     def __add__(self, other):
         for name_self, name_other in zip(self.param_names, other.param_names):
