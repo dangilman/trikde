@@ -513,7 +513,7 @@ class DensitySamples(object):
     """
     This class combins several instances of SingleDensity, that are combined by averaging
     """
-    def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=0.6,
+    def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=1.0,
                  nbins=12, use_kde='GAUSSIAN', samples_width_scale=3, density=None,
                  nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp=False,
                  boundary_order=1, force_bandwidth=None):
@@ -576,6 +576,7 @@ class DensitySamples(object):
             else:
                 self.param_ranges = param_ranges
             self.param_names = param_names
+            #assert len(param_names) == len(self.param_ranges), 'param_names and param_ranges must be the same length'
             if use_kde:
                 self.density = estimator(data, self.param_ranges, weights)
                 self._kde_bandwidth = estimator.kde_bandwidth

@@ -164,6 +164,7 @@ class TrianglePlot(object):
         if not isinstance(contour_alpha, list):
             contour_alpha = [contour_alpha] * int(self._nchains)
         for i in range(self._nchains):
+
             axes.append(self._make_triplot_i(axes, i, contour_colors, contour_levels, filled_contours,
                                              contour_alpha[i],
                                              fig_size, truths,
@@ -758,7 +759,7 @@ class TrianglePlot(object):
 
     def get_parameter_confidence_interval(self, parameter, clevel, chain_num=None,
                                           show_percentage=False, return_intervals=False,
-                                          print_intervals=True, thresh=None):
+                                          print_intervals=True, thresh=None, return_median_CI=False):
 
         if print_intervals:
             print('parameter name: ', parameter)
@@ -790,7 +791,8 @@ class TrianglePlot(object):
             median, [lower, upper] = self._confidence_int(pmin, pmax, bar_centers, bar_heights, clevel, thresh)
 
             #chain.append({''})
-
+            if return_median_CI:
+                return median, lower - median, upper - median
             if print_intervals:
                 print('SAMPLES ' + str(idx + 1) + ':')
                 if show_percentage:
