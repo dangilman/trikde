@@ -1,6 +1,5 @@
 import numpy as np
-from trikde.kde import KDE, LinearKDE
-from trikde.kde import BoundaryCorrection
+from trikde.kde import KDE, BoundaryCorrection
 from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
@@ -516,7 +515,7 @@ class DensitySamples(object):
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=1.0,
                  nbins=12, use_kde='GAUSSIAN', samples_width_scale=3, density=None,
                  nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp=False,
-                 boundary_order=1, force_bandwidth=None):
+                 boundary_order=1, force_bandwidth=None, second_order_correction_floor=1e-10):
 
         """
 
@@ -538,6 +537,9 @@ class DensitySamples(object):
         :param n_resample: the number of points to draw when resampling
         :param sharing_interp:
         :param boundary_order: if 1, performs a first-order boundary correction for the KDE
+        :param force_bandwidth: force a specific KDE bandwidth
+        :param second_order_correction_floor: numerical tolerance when implementing multiplicative bias
+        2nd order boundary correction
         """
         if density is not None:
             self._kde_bandwidth = None
