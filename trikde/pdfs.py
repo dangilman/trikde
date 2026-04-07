@@ -466,6 +466,17 @@ class CustomPriorHyperCube(object):
     def averaged(self):
         return self.density
 
+def CIFromDensity(domain, pdf, level=68):
+    cdf = np.cumsum(pdf)
+    cdf = cdf / cdf[-1]
+    u_min = np.min(cdf)
+    u_max = 1.0
+    u = np.linspace(u_min, u_max, 100)
+    cdf_inverse = interp1d(cdf, u)
+    x = np.random.uniform(u_min, u_max, 20000)
+    samples = cdf_inverse(x)
+    return CI(samples, level)
+
 def CI(samples, level=68):
     import scipy.stats as st
 
