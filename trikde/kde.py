@@ -194,14 +194,17 @@ class KDE(PointInterp):
         # now compute the guassian KDE
         density = fftconvolve(H, gaussian_kernel, mode='same')
 
-        # renormalize the boundary to remove bias
-        if self._boundary_order == 1:
-            density = BoundaryCorrection(gaussian_kernel, self._second_order_correction_floor).first_order(density)
-
+        bc = BoundaryCorrection(gaussian_kernel, self._second_order_correction_floor)
+        if self._boundary_order == 0:
+            pass  # no correction
+        elif self._boundary_order == 1:
+            density = bc.first_order(density)
         elif self._boundary_order == 2:
-            density = BoundaryCorrection(gaussian_kernel, self._second_order_correction_floor).second_order(density, H, gaussian_kernel)
+            density = bc.second_order(density, H, gaussian_kernel)
+
         ##take the transpose of the output so that it's the original coordinates.
         return density.T
+
 
 class BoundaryCorrection(object):
 
