@@ -111,17 +111,24 @@ class InterpolatedLikelihood(object):
                 elif value < self.param_ranges[i][0] or value > self.param_ranges[i][1]:
                     if self._extrapolate is False:
                         raise Exception('point was out of bounds: ', point)
-            p = float(self.interp(point))
+            p = float(self.interp(point)[0])
             return p
 
     def call_at_points(self, point_list):
-
         """
         Evaluates the likelihood at a set of points in parameter space
         :param point_list: a list or numpy array of points at which to evaluate likelihood
 
         Returns the likelihood
         """
+        # rebuild the _spline cache lost when self.interp was pickled to this worker
+        interp = self.interp
+        if getattr(interp, "_spline", None) is None and interp.method in (
+                "slinear", "cubic", "quintic", "pchip"):
+            from scipy.interpolate import RegularGridInterpolator
+            interp._spline = RegularGridInterpolator(
+                interp.grid, interp.values, method=interp.method
+            )._spline
 
         f = []
         if isinstance(point_list, list):
@@ -130,7 +137,7 @@ class InterpolatedLikelihood(object):
         else:
             f = np.empty(point_list.shape[0])
             for i in range(0, point_list.shape[0]):
-                f[i] = float(self(tuple(point_list[i,:])))
+                f[i] = float(self(tuple(point_list[i, :])))
         return np.squeeze(f)
 
 class GaussianWeight(object):

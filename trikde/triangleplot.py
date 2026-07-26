@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.gridspec as gridspec
 from scipy.interpolate import interp1d
 
-class TrianglePlot(object):
 
+class TrianglePlot(object):
     _default_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
                                (colors.cnames['dodgerblue'], colors.cnames['blue'], 'k'),
                                (colors.cnames['orchid'], colors.cnames['darkviolet'], 'k'),
@@ -16,9 +16,9 @@ class TrianglePlot(object):
     truth_color = 'g'
     truth_color_list = None
     _highc_contour_colors = [(colors.cnames['darkslategrey'], colors.cnames['black'], 'k'),
-                               (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
-                               (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
-                               (colors.cnames['navajowhite'], colors.cnames['darkorange'], 'k')]
+                             (colors.cnames['lightgreen'], colors.cnames['green'], 'k'),
+                             (colors.cnames['plum'], colors.cnames['darkviolet'], 'k'),
+                             (colors.cnames['navajowhite'], colors.cnames['darkorange'], 'k')]
 
     spacing = np.array([0.1, 0.1, 0.05, 0.05, 0.2, 0.11])
     spacing_scale = 1.
@@ -26,7 +26,8 @@ class TrianglePlot(object):
     _color_eval = 0.9
     show_intervals_68 = False
 
-    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat', param_name_transformation=None,
+    def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat',
+                 param_name_transformation=None,
                  ticks_and_labels_settings=None):
         """
 
@@ -53,7 +54,7 @@ class TrianglePlot(object):
             self._prange_list = parameter_ranges
             self.parameter_ranges = {}
             for i, pname in enumerate(self.param_names):
-                self.parameter_ranges.update({pname:parameter_ranges[i]})
+                self.parameter_ranges.update({pname: parameter_ranges[i]})
         elif isinstance(parameter_ranges, dict):
             self.parameter_ranges = parameter_ranges
             self._prange_list = []
@@ -61,7 +62,7 @@ class TrianglePlot(object):
                 self._prange_list.append(self.parameter_ranges[pi])
 
         self._NDdensity_list = independent_likelihoods_list
-        
+
         self.set_cmap(cmap)
 
     def _load_projection_1D(self, pname, idx):
@@ -95,7 +96,7 @@ class TrianglePlot(object):
 
         ax = plt.gca()
         contours = ax.contour(X, Y, density, levels, extent=extent,
-                       colors=contour_colors, linewidths=linewidths, zorder=1, linestyles=['dashed', 'solid'])
+                              colors=contour_colors, linewidths=linewidths, zorder=1, linestyles=['dashed', 'solid'])
 
         self._contours(coordsx, coordsy, density, ax, extent=extent,
                        contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
@@ -106,8 +107,8 @@ class TrianglePlot(object):
     def make_joint(self, p1, p2, contour_colors=None, levels=[0.05, 0.32, 1],
                    filled_contours=True, contour_alpha=0.6,
                    fig_size=8, label_scale=1, tick_label_font=12,
-                     xtick_label_rotate=0, show_contours=True,norm=None,
-                   logscale=False,vmin=None,vmax=None):
+                   xtick_label_rotate=0, show_contours=True, norm=None,
+                   logscale=False, vmin=None, vmax=None):
 
         self.fig = plt.figure(1)
         self._init(fig_size)
@@ -121,13 +122,199 @@ class TrianglePlot(object):
         ims = []
         for i in range(self._nchains):
             axes, im = self._make_joint_i(p1, p2, ax, i, contour_colors=contour_colors, levels=levels,
-                      filled_contours=filled_contours, contour_alpha=contour_alpha,
-                      labsize=15*label_scale, tick_label_font=tick_label_font,
-                               xtick_label_rotate=xtick_label_rotate,
+                                          filled_contours=filled_contours, contour_alpha=contour_alpha,
+                                          labsize=15 * label_scale, tick_label_font=tick_label_font,
+                                          xtick_label_rotate=xtick_label_rotate,
                                           show_contours=show_contours,
-                                          norm=norm,logscale=logscale,vmin=vmin,vmax=vmax)
+                                          norm=norm, logscale=logscale, vmin=vmin, vmax=vmax)
             ims.append(im)
         return axes, ims
+
+    def make_triplot_relative_likelihood(self, color_index=0, cmap=None, norm=None,
+                                         axis_label_font=16, tick_label_font=12,
+                                         xtick_label_rotate=0, fig_size=8,
+                                         display_params=None, figure=1,
+                                         show_marginals=True,
+                                         marginal_color=None,
+                                         kwargs_plot_maximum_likelihood=None):
+        """
+        Build a triangle plot whose joint (2D) panels are colored by relative likelihood
+        (i.e. density normalized to its own peak value, equivalent to a posterior odds
+        ratio relative to the best-fit point in that panel) rather than by discrete
+        filled confidence contours as in make_triplot.
+
+        Each joint panel is rendered with a single continuous imshow call, and the
+        resulting image artists are returned so a shared colorbar (e.g. with a custom
+        BoundaryNorm keyed to odds ratios like 2:1, 10:1, 100:1) can be attached after
+        the fact via plt.colorbar(images[0], ax=axes, ...).
+
+        Note: relative likelihood is computed independently per panel (normalized to
+        that panel's own maximum), so colors are only comparable to that panel's own
+        best-fit point, not to absolute density across panels.
+
+        :param color_index: int; index into self._NDdensity_list selecting which
+            chain/likelihood object to plot. Unlike make_triplot, this method only
+            plots a single chain per call (no looping over self._nchains).
+        :param cmap: a matplotlib Colormap instance used for all joint panels. If
+            None, defaults to self.cmap_call (the colormap set via set_cmap/__init__).
+        :param norm: a matplotlib Normalize (or BoundaryNorm) instance applied to all
+            joint panels. If None, imshow falls back to default linear normalization
+            over each panel's own [0, 1] range, since density is pre-divided by its
+            max. Pass an explicit norm (e.g. BoundaryNorm) to get consistent binning/
+            coloring across panels and a meaningful shared colorbar.
+        :param axis_label_font: font size for the outer x/y axis labels
+        :param tick_label_font: font size for tick labels
+        :param xtick_label_rotate: rotation (degrees) applied to x tick labels
+        :param fig_size: base figure size passed to self._init and used to scale
+            the overall figure dimensions with the number of displayed parameters
+        :param display_params: list of parameter names to include, in plotting order.
+            If None, defaults to all of self.param_names.
+        :param figure: matplotlib figure number to draw into (passed to plt.figure)
+        :param show_marginals: if True, draw 1D marginal histograms on the diagonal
+            panels (filled with a single color from cmap, unlike make_triplot's
+            per-chain marginal coloring). If False, diagonal panels are left blank.
+        :param kwargs_plot_maximum_likelihood: kwargs for plotting the point that marks the maximum likelihood
+        :return: (axes, images)
+            axes: list of all Axes objects in the triangle grid, in row-major flat
+                order (joint, marginal, and blank panels included), matching the
+                layout convention used by make_triplot.
+            images: list of the AxesImage artists from the joint panels only, in
+                the order they were drawn (row-major over the lower triangle).
+                Use images[0] (or any element, since they share cmap/norm) as the
+                mappable argument to plt.colorbar.
+        """
+        self.fig = plt.figure(figure)
+        self._init(fig_size)
+
+        if display_params is None:
+            display_params = self.param_names
+        n_subplots = len(display_params)
+
+        axes = []
+        gs1 = gridspec.GridSpec(n_subplots, n_subplots)
+        gs1.update(wspace=0.15, hspace=0.15)
+        counter = 1
+        for row in range(n_subplots):
+            for col in range(n_subplots):
+                axes.append(plt.subplot(gs1[counter - 1]))
+                counter += 1
+
+        if cmap is None:
+            cmap = self.cmap_call
+
+        size_scale = n_subplots * 0.1 + 1
+        self.fig.set_size_inches(fig_size * size_scale, fig_size * size_scale)
+
+        images = []
+        plot_index = 0
+        marg_in_row = 0
+        self._auto_scale = []
+
+        for row in range(n_subplots):
+            marg_done = False
+            for col in range(n_subplots):
+
+                if col < marg_in_row:
+                    # joint panel: relative likelihood map
+                    density = self._load_projection_2D(display_params[col], display_params[row], color_index)
+                    rel_density = density / np.max(density)
+
+                    extent, aspect = self._extent_aspect([display_params[col], display_params[row]])
+                    pmin1, pmax1 = extent[0], extent[1]
+                    pmin2, pmax2 = extent[2], extent[3]
+
+                    im = axes[plot_index].imshow(rel_density, extent=extent, aspect=aspect,
+                                                 origin='lower', cmap=cmap, norm=norm)
+                    if kwargs_plot_maximum_likelihood is not None:
+                        ny, nx = rel_density.shape
+                        iy, ix = np.unravel_index(np.argmax(rel_density), rel_density.shape)
+                        xmin, xmax, ymin, ymax = extent
+                        x_max_likelihood = xmin + (ix + 0.5) * (xmax - xmin) / nx
+                        y_max_likelihood = ymin + (iy + 0.5) * (ymax - ymin) / ny
+                        axes[plot_index].scatter(x_max_likelihood, y_max_likelihood, **kwargs_plot_maximum_likelihood)
+
+                    images.append(im)
+
+                    axes[plot_index].set_xlim(pmin1, pmax1)
+                    axes[plot_index].set_ylim(pmin2, pmax2)
+
+                    xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(display_params[col], axis='x')
+                    ytick_locs, ytick_labels, ylabel = self.ticks_and_labels(display_params[row], axis='y')
+
+                    if row == n_subplots - 1:
+                        axes[plot_index].set_xticks(xtick_locs)
+                        axes[plot_index].set_xticklabels(xtick_labels, fontsize=tick_label_font,
+                                                         rotation=xtick_label_rotate)
+                        axes[plot_index].set_xlabel(xlabel, fontsize=axis_label_font)
+                    else:
+                        axes[plot_index].set_xticks([])
+
+                    if col == 0:
+                        axes[plot_index].set_yticks(ytick_locs)
+                        axes[plot_index].set_yticklabels(ytick_labels, fontsize=tick_label_font)
+                        axes[plot_index].set_ylabel(ylabel, fontsize=axis_label_font)
+                    else:
+                        axes[plot_index].set_yticks([])
+
+                elif marg_in_row == col and not marg_done:
+                    marg_done = True
+                    marg_in_row += 1
+
+                    if show_marginals:
+                        density = self._load_projection_1D(display_params[col], color_index)
+                        pmin, pmax = self._get_param_minmax(display_params[col])
+                        coords = np.linspace(pmin, pmax, len(density))
+                        bar_centers, bar_width, bar_heights = self._bar_plot_heights(density, coords, None)
+                        bar_heights *= (np.sum(bar_heights) * len(bar_centers)) ** -1
+
+                        self._auto_scale.append({display_params[col]: [plot_index, max(bar_heights)]})
+
+                        if marginal_color is None:
+                            marginal_col = self._marginal_col if self._marginal_col is not None else 'k'
+                        else:
+                            marginal_col = marginal_color
+                        for i, y in enumerate(bar_heights):
+                            x1, x2 = bar_centers[i] - bar_width * .5, bar_centers[i] + bar_width * .5
+                            axes[plot_index].fill_between([x1, x2], y, color=marginal_col, alpha=0.7)
+                            axes[plot_index].plot([x1, x2], [y, y], color=marginal_col, alpha=0.9)
+
+                        axes[plot_index].set_xlim(pmin, pmax)
+                        axes[plot_index].set_yticks([])
+
+                        xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(display_params[col], axis='x')
+                        if col != n_subplots - 1:
+                            axes[plot_index].set_xticks([])
+                        else:
+                            axes[plot_index].set_xticks(xtick_locs)
+                            axes[plot_index].set_xticklabels(xtick_labels, fontsize=tick_label_font,
+                                                             rotation=xtick_label_rotate)
+                            axes[plot_index].set_xlabel(xlabel, fontsize=axis_label_font)
+                    else:
+                        axes[plot_index].axis('off')
+                else:
+                    axes[plot_index].axis('off')
+
+                plot_index += 1
+            marg_in_row = marg_in_row
+
+        for key in display_params:
+            max_h = []
+            plot_index_for_key = None
+            for scale in self._auto_scale:
+                if key in scale:
+                    max_h.append(scale[key][1])
+                    plot_index_for_key = scale[key][0]
+            if max_h:
+                axes[plot_index_for_key].set_ylim(0., 1.1 * max(max_h))
+
+        self._auto_scale = []
+
+        plt.subplots_adjust(left=self.spacing[0] * self.spacing_scale, bottom=self.spacing[1] * self.spacing_scale,
+                            right=1 - self.spacing[2] * self.spacing_scale,
+                            top=1 - self.spacing[3] * self.spacing_scale,
+                            wspace=self.spacing[4] * self.spacing_scale, hspace=self.spacing[5] * self.spacing_scale)
+
+        return axes, images
 
     def make_triplot(self, contour_levels=[0.05, 0.32, 1],
                      filled_contours=True, contour_alpha=0.6,
@@ -152,7 +339,7 @@ class TrianglePlot(object):
 
         for row in range(n_subplots):
             for col in range(n_subplots):
-                axes.append(plt.subplot(gs1[counter-1]))
+                axes.append(plt.subplot(gs1[counter - 1]))
                 counter += 1
 
         if contour_colors is None:
@@ -164,7 +351,6 @@ class TrianglePlot(object):
         if not isinstance(contour_alpha, list):
             contour_alpha = [contour_alpha] * int(self._nchains)
         for i in range(self._nchains):
-
             axes.append(self._make_triplot_i(axes, i, contour_colors, contour_levels, filled_contours,
                                              contour_alpha[i],
                                              fig_size, truths,
@@ -179,7 +365,6 @@ class TrianglePlot(object):
         for key in display_params:
             max_h = []
             for scale in self._auto_scale:
-
                 max_h.append(scale[key][1])
                 plot_index = scale[key][0]
             max_h = max(max_h)
@@ -198,7 +383,7 @@ class TrianglePlot(object):
                       filled_contours=True, contour_alpha=0.6, param_names=None,
                       fig_size=8, truths=None, load_from_file=True,
                       transpose_idx=None, bandwidth_scale=0.7, label_scale=1,
-                      cmap=None, xticklabel_rotate=0, bar_alpha=0.7, bar_colors=['k','b','m','r'],
+                      cmap=None, xticklabel_rotate=0, bar_alpha=0.7, bar_colors=['k', 'b', 'm', 'r'],
                       height_scale=1.1, show_low=False, show_high=False):
 
         self.fig = plt.figure(1)
@@ -213,10 +398,11 @@ class TrianglePlot(object):
         self._auto_scale = []
         for i in range(self._nchains):
             out = self._make_marginal_i(p1, ax, i, contour_colors, levels, filled_contours, contour_alpha, param_names,
-                                  fig_size, truths, load_from_file=load_from_file,
-                                  transpose_idx=transpose_idx, bandwidth_scale=bandwidth_scale,
-                                  label_scale=label_scale, cmap=cmap, xticklabel_rotate=xticklabel_rotate,
-                                  bar_alpha=bar_alpha, bar_color=bar_colors[i], show_low=show_low, show_high=show_high)
+                                        fig_size, truths, load_from_file=load_from_file,
+                                        transpose_idx=transpose_idx, bandwidth_scale=bandwidth_scale,
+                                        label_scale=label_scale, cmap=cmap, xticklabel_rotate=xticklabel_rotate,
+                                        bar_alpha=bar_alpha, bar_color=bar_colors[i], show_low=show_low,
+                                        show_high=show_high)
 
         scales = []
         for c in range(0, self._nchains):
@@ -237,7 +423,7 @@ class TrianglePlot(object):
                          load_from_file=True, transpose_idx=None,
                          bandwidth_scale=0.7, label_scale=None, cmap=None, xticklabel_rotate=0,
                          bar_alpha=0.7, bar_color=None, show_low=False, show_high=False):
-        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
+        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'):  # high-contrast flag
             self.truth_color = 'dodgerblue'
         autoscale = []
 
@@ -259,7 +445,7 @@ class TrianglePlot(object):
             x1, x2 = bar_centers[i] - bar_width * .5, bar_centers[i] + bar_width * .5
 
             ax.plot([x1, x2], [y, y], color=bar_color,
-                        alpha=bar_alpha)
+                    alpha=bar_alpha)
             ax.fill_between([x1, x2], y, color=bar_color,
                             alpha=0.6)
             ax.plot([x1, x1], [0, y], color=bar_color,
@@ -313,8 +499,8 @@ class TrianglePlot(object):
 
     def _make_joint_i(self, p1, p2, ax, color_index, contour_colors=None, levels=[0.05, 0.22, 1],
                       filled_contours=True, contour_alpha=0.6, labsize=None, tick_label_font=None,
-                               xtick_label_rotate=None, show_contours=None,
-                      norm=None,logscale=False,vmin=None,vmax=None):
+                      xtick_label_rotate=None, show_contours=None,
+                      norm=None, logscale=False, vmin=None, vmax=None):
 
         density = self._load_projection_2D(p1, p2, color_index)
 
@@ -329,12 +515,13 @@ class TrianglePlot(object):
             if logscale:
                 print('WARNING: you specified log_scale = True, but this has no effect when filled_contours=True')
             if vmin is None or vmax is None:
-                print('WARNING: you specified vmin or vmax, but these arguments have no effect when filled_contours=True')
+                print(
+                    'WARNING: you specified vmin or vmax, but these arguments have no effect when filled_contours=True')
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
 
             im = ax.imshow(density, extent=extent, aspect=aspect,
-                      origin='lower', cmap=self.cmap, alpha=0, norm=norm)
+                           origin='lower', cmap=self.cmap, alpha=0, norm=norm)
             self._contours(coordsx, coordsy, density, ax, extent=extent,
                            contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
                            levels=levels)
@@ -351,18 +538,18 @@ class TrianglePlot(object):
             else:
                 d = density / np.max(density)
                 if vmin is None:
-                    #vmin = np.min(d)
+                    # vmin = np.min(d)
                     vmin = 0.0
                 if vmax is None:
                     vmax = 1.0
             coordsx = np.linspace(extent[0], extent[1], density.shape[0])
             coordsy = np.linspace(extent[2], extent[3], density.shape[1])
             im = ax.imshow(d, origin='lower', cmap=self.cmap, alpha=1, vmin=vmin,
-                      vmax=vmax, aspect=aspect, extent=extent, norm=norm)
+                           vmax=vmax, aspect=aspect, extent=extent, norm=norm)
             if show_contours:
                 self._contours(coordsx, coordsy, density, ax, extent=extent, filled_contours=False,
-                           contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
-                           levels=levels)
+                               contour_colors=contour_colors[color_index], contour_alpha=contour_alpha,
+                               levels=levels)
             ax.set_xlim(pmin1, pmax1)
             ax.set_ylim(pmin2, pmax2)
 
@@ -389,7 +576,7 @@ class TrianglePlot(object):
                         show_contours=True, show_intervals=True,
                         display_params=None):
 
-        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'): # high-contrast flag
+        if contour_colors[-1] == ('#FFDEAD', '#FF8C00', 'k'):  # high-contrast flag
             self.truth_color = 'dodgerblue'
         size_scale = len(display_params) * 0.1 + 1
         self.fig.set_size_inches(fig_size * size_scale, fig_size * size_scale)
@@ -418,16 +605,16 @@ class TrianglePlot(object):
 
                     density = self._load_projection_2D(display_params[row], display_params[col], color_index)
                     self.triplot_densities.append(density)
-                    self.joint_names.append(display_params[row]+'_'+display_params[col])
+                    self.joint_names.append(display_params[row] + '_' + display_params[col])
 
                     extent, aspect = self._extent_aspect([display_params[col], display_params[row]])
                     pmin1, pmax1 = extent[0], extent[1]
                     pmin2, pmax2 = extent[2], extent[3]
 
                     xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(display_params[col],
-                                                                                       axis='x')
+                                                                             axis='x')
                     ytick_locs, ytick_labels, ylabel = self.ticks_and_labels(display_params[row],
-                                                                                axis='y')
+                                                                             axis='y')
 
                     if row == n_subplots - 1:
 
@@ -461,7 +648,7 @@ class TrianglePlot(object):
                     if filled_contours:
                         coordsx = np.linspace(extent[0], extent[1], density.shape[0])
                         coordsy = np.linspace(extent[2], extent[3], density.shape[1])
-                        
+
                         vmax = np.max(density)
                         axes[plot_index].imshow(density.T, extent=extent, aspect=aspect,
                                                 origin='lower', cmap=self.cmap, alpha=0, vmin=0, vmax=vmax)
@@ -501,10 +688,13 @@ class TrianglePlot(object):
                             if self.truth_color_list is None:
                                 self.truth_color_list = [self.truth_color, 'y', '0.6', '0.3']
                             for truth_index in range(0, len(truths)):
-                                t1, t2 = truths[truth_index][display_params[col]], truths[truth_index][display_params[row]]
+                                t1, t2 = truths[truth_index][display_params[col]], truths[truth_index][
+                                    display_params[row]]
                                 axes[plot_index].scatter(t1, t2, color=self.truth_color_list[truth_index], s=50)
-                                axes[plot_index].axvline(t1, linestyle='--', color=self.truth_color_list[truth_index], linewidth=3)
-                                axes[plot_index].axhline(t2, linestyle='--', color=self.truth_color_list[truth_index], linewidth=3)
+                                axes[plot_index].axvline(t1, linestyle='--', color=self.truth_color_list[truth_index],
+                                                         linewidth=3)
+                                axes[plot_index].axhline(t2, linestyle='--', color=self.truth_color_list[truth_index],
+                                                         linewidth=3)
 
                 elif marg_in_row == col and marg_done is False:
 
@@ -552,8 +742,10 @@ class TrianglePlot(object):
                     axes[plot_index].set_yticks([])
 
                     if show_intervals:
-                        mean_of_distribution, [low68, high68] = self._confidence_int(pmin, pmax, bar_centers, bar_heights,1)
-                        mean_of_distribution, [low95, high95] = self._confidence_int(pmin, pmax, bar_centers, bar_heights,2)
+                        mean_of_distribution, [low68, high68] = self._confidence_int(pmin, pmax, bar_centers,
+                                                                                     bar_heights, 1)
+                        mean_of_distribution, [low95, high95] = self._confidence_int(pmin, pmax, bar_centers,
+                                                                                     bar_heights, 2)
 
                     if show_intervals and low95 is not None:
                         axes[plot_index].axvline(low95, color=contour_colors[color_index][1],
@@ -569,12 +761,12 @@ class TrianglePlot(object):
                         axes[plot_index].axvline(high68, color=contour_colors[color_index][1],
                                                  alpha=0.8, linewidth=2.5, linestyle=':')
 
-
                     if col != n_subplots - 1:
                         axes[plot_index].set_xticks([])
                     else:
                         axes[plot_index].set_xticks(xtick_locs)
-                        axes[plot_index].set_xticklabels(xtick_labels, fontsize=tick_label_font, rotation=xtick_label_rotate)
+                        axes[plot_index].set_xticklabels(xtick_labels, fontsize=tick_label_font,
+                                                         rotation=xtick_label_rotate)
                         axes[plot_index].set_xlabel(xlabel, fontsize=axis_label_font)
 
                     if truths is not None:
@@ -588,7 +780,8 @@ class TrianglePlot(object):
                                 pmin, pmax = self._get_param_minmax(display_params[col])
                                 if t <= pmin:
                                     t = pmin * 1.075
-                                axes[plot_index].axvline(t, linestyle='--', color=self.truth_color_list[idx_truth], linewidth=3)
+                                axes[plot_index].axvline(t, linestyle='--', color=self.truth_color_list[idx_truth],
+                                                         linewidth=3)
                             elif isinstance(t, list):
                                 axes[plot_index].axvspan(t[0], t[1], alpha=0.25, color=self.truth_color_list[idx_truth])
                     #
@@ -629,18 +822,18 @@ class TrianglePlot(object):
 
         samples = []
 
-        while len(samples)<10000:
+        while len(samples) < 10000:
 
             samp = np.random.uniform(pmin, pmax)
             prob = prob_interp(samp)
-            u = np.random.uniform(0,1)
+            u = np.random.uniform(0, 1)
 
             if prob >= u:
                 samples.append(samp)
-        #print('num sigma:', num_sigma)
+        # print('num sigma:', num_sigma)
         mu, sigmas = compute_confidence_intervals(samples, num_sigma, thresh)
 
-        return mu, [mu-sigmas[0], mu+sigmas[1]]
+        return mu, [mu - sigmas[0], mu + sigmas[1]]
 
     def _extent_aspect(self, param_names):
 
@@ -744,7 +937,8 @@ class TrianglePlot(object):
         """
         if self._ticks_and_labels_settings is None:
             decimals, nticks = auto_decimal_places(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1])
-            tick_locs = np.round(np.linspace(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1], nticks), decimals)
+            tick_locs = np.round(np.linspace(self.parameter_ranges[pname][0], self.parameter_ranges[pname][1], nticks),
+                                 decimals)
             tick_labels = tick_locs
         else:
             tick_locs = self._ticks_and_labels_settings[pname]['tick_locations']
@@ -790,7 +984,7 @@ class TrianglePlot(object):
 
             median, [lower, upper] = self._confidence_int(pmin, pmax, bar_centers, bar_heights, clevel, thresh)
 
-            #chain.append({''})
+            # chain.append({''})
             if return_median_CI:
                 return median, lower - median, upper - median
             if print_intervals:
@@ -798,7 +992,7 @@ class TrianglePlot(object):
                 if show_percentage:
                     print(str(median) + ' (' + str(lower) + ', ' + str(upper) + ')')
                 else:
-                    print(str(median) + ' ('+str(lower)+', '+str(upper)+')')
+                    print(str(median) + ' (' + str(lower) + ', ' + str(upper) + ')')
                 print('width: ', upper - lower)
             medians.append(median)
             uppers.append(upper)
@@ -809,8 +1003,8 @@ class TrianglePlot(object):
         else:
             return None
 
-def auto_decimal_places(param_min, param_max):
 
+def auto_decimal_places(param_min, param_max):
     nticks = 5
 
     if param_min == 0:
@@ -845,6 +1039,7 @@ def auto_decimal_places(param_min, param_max):
 
     return decimals, nticks
 
+
 def compute_confidence_intervals_histogram(sample, num_sigma):
     """
     computes the upper and lower sigma from the median value.
@@ -858,18 +1053,85 @@ def compute_confidence_intervals_histogram(sample, num_sigma):
     median = np.median(sample)
     sorted_sample = np.sort(sample)
 
-    num_threshold1 = int(round((num-1)*0.841345))
-    num_threshold2 = int(round((num-1)*0.977249868))
-    num_threshold3 = int(round((num-1)*0.998650102))
+    num_threshold1 = int(round((num - 1) * 0.841345))
+    num_threshold2 = int(round((num - 1) * 0.977249868))
+    num_threshold3 = int(round((num - 1) * 0.998650102))
 
     if num_sigma == 1:
         upper_sigma1 = sorted_sample[num_threshold1 - 1]
         lower_sigma1 = sorted_sample[num - num_threshold1 - 1]
-        return median, [median-lower_sigma1, upper_sigma1-median]
+        return median, [median - lower_sigma1, upper_sigma1 - median]
     if num_sigma == 2:
         upper_sigma2 = sorted_sample[num_threshold2 - 1]
         lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
-        return median, [median-lower_sigma2, upper_sigma2-median]
+        return median, [median - lower_sigma2, upper_sigma2 - median]
+
+
+def make_colorbar(triplot, axes, images, ratios,
+                   top_index, bottom_index, label='Relative likelihood',
+                   label_fontsize=18, tick_fontsize=18,
+                  stretch_y=1.0,
+                  shift_x=1.0,
+                  width_scale=0.15):
+    """
+    Build a colorbar spanning two panels' vertical extent, with bin boundaries
+    and tick labels derived directly from a list of posterior odds ratios.
+
+    :param triplot: the TrianglePlot instance (used to access triplot.fig)
+    :param axes: list of Axes returned by make_triplot_relative_likelihood
+    :param images: list of AxesImage artists returned by make_triplot_relative_likelihood
+    :param ratios: list of odds ratios, e.g. [1, 2, 4, 10, 20]. Must include 1
+        exactly once (the "even" odds point). Bin edges and tick labels are
+        derived from this list, so they can never drift out of sync.
+    :param top_index: index into axes of the panel marking the top of the
+        colorbar's vertical span (typically a blank/off panel)
+    :param bottom_index: index into axes of the panel marking the bottom of
+        the colorbar's vertical span
+    :param label: colorbar axis label text
+    :param label_fontsize: font size for the colorbar label
+    :param tick_fontsize: font size for the colorbar tick labels
+    :param stretch_y: factor by which to elongate the colorbar in the y
+        direction, anchored on its own vertical center. stretch=1.0 leaves
+        the height (computed from top_index/bottom_index) unchanged;
+        stretch=1.5 makes it 50% taller; stretch=0.5 makes it half as tall.
+        The colorbar's vertical center stays fixed as stretch changes.
+    :param shift_x: factor by which to shift the colorbar horizontally
+    :return: the matplotlib Colorbar instance
+    """
+    fig = triplot.fig
+
+    sorted_ratios = sorted(ratios, reverse=True)  # descending: largest ratio first
+    boundaries = [1 / r for r in sorted_ratios]
+    tick_labels = [f'{r}:1' if r != 1 else 'even' for r in sorted_ratios]
+
+    top_ax = axes[top_index]
+    bottom_ax = axes[bottom_index]
+
+    pos_top = top_ax.get_position()
+    pos_bottom = bottom_ax.get_position()
+
+    y_bottom = pos_bottom.y0
+    y_top = pos_top.y0 + pos_top.height
+    total_height = y_top - y_bottom
+
+    # base (unstretched) box, before applying stretch
+    base_y0 = y_bottom + total_height * 0.1
+    base_height = total_height * 0.8
+
+    # stretch the height while keeping the vertical center fixed
+    center = base_y0 + base_height * 0.5
+    new_height = base_height * stretch_y
+    new_y0 = center - new_height * 0.5
+
+    cbar_ax = fig.add_axes([shift_x * pos_top.x0 + pos_top.width * 0.4, new_y0,
+                            pos_top.width * width_scale, new_height])
+    cbar = fig.colorbar(images[0], cax=cbar_ax)
+    cbar.set_label(label, fontsize=label_fontsize)
+    cbar.set_ticks(boundaries)
+    cbar.set_ticklabels(tick_labels)
+    cbar.ax.tick_params(labelsize=tick_fontsize)
+
+    return cbar
 
 def compute_confidence_intervals(sample, num_sigma, thresh=None):
     """
@@ -885,23 +1147,23 @@ def compute_confidence_intervals(sample, num_sigma, thresh=None):
     sorted_sample = np.sort(sample)
 
     if thresh is None:
-        num_threshold1 = int(round((num-1)*0.841345))
-        num_threshold2 = int(round((num-1)*0.977249868))
-        num_threshold3 = int(round((num-1)*0.998650102))
+        num_threshold1 = int(round((num - 1) * 0.841345))
+        num_threshold2 = int(round((num - 1) * 0.977249868))
+        num_threshold3 = int(round((num - 1) * 0.998650102))
 
         if num_sigma == 1:
             upper_sigma1 = sorted_sample[num_threshold1 - 1]
             lower_sigma1 = sorted_sample[num - num_threshold1 - 1]
-            return median, [median-lower_sigma1, upper_sigma1-median]
+            return median, [median - lower_sigma1, upper_sigma1 - median]
         if num_sigma == 2:
             upper_sigma2 = sorted_sample[num_threshold2 - 1]
             lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
-            return median, [median-lower_sigma2, upper_sigma2-median]
+            return median, [median - lower_sigma2, upper_sigma2 - median]
     else:
 
         assert thresh <= 1
-        thresh = (1 + thresh)/2
-        num_threshold = int(round((num-1) * thresh))
+        thresh = (1 + thresh) / 2
+        num_threshold = int(round((num - 1) * thresh))
         upper = sorted_sample[num_threshold - 1]
         lower = sorted_sample[num - num_threshold - 1]
         return median, [median - lower, upper - median]
