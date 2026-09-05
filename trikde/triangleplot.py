@@ -1072,7 +1072,8 @@ def make_colorbar(triplot, axes, images, ratios,
                    label_fontsize=18, tick_fontsize=18,
                   stretch_y=1.0,
                   shift_x=1.0,
-                  width_scale=0.15):
+                  width_scale=0.15,
+                  labelpad=10):
     """
     Build a colorbar spanning two panels' vertical extent, with bin boundaries
     and tick labels derived directly from a list of posterior odds ratios.
@@ -1126,7 +1127,7 @@ def make_colorbar(triplot, axes, images, ratios,
     cbar_ax = fig.add_axes([shift_x * pos_top.x0 + pos_top.width * 0.4, new_y0,
                             pos_top.width * width_scale, new_height])
     cbar = fig.colorbar(images[0], cax=cbar_ax)
-    cbar.set_label(label, fontsize=label_fontsize)
+    cbar.set_label(label, fontsize=label_fontsize, labelpad=labelpad)
     cbar.set_ticks(boundaries)
     cbar.set_ticklabels(tick_labels)
     cbar.ax.tick_params(labelsize=tick_fontsize)
@@ -1159,6 +1160,10 @@ def compute_confidence_intervals(sample, num_sigma, thresh=None):
             upper_sigma2 = sorted_sample[num_threshold2 - 1]
             lower_sigma2 = sorted_sample[num - num_threshold2 - 1]
             return median, [median - lower_sigma2, upper_sigma2 - median]
+        if num_sigma == 3:
+            upper_sigma3 = sorted_sample[num - num_threshold3 - 1]
+            lower_sigma3 = sorted_sample[num - num_threshold3 - 1]
+            return median, [median - lower_sigma3, upper_sigma3 - median]
     else:
 
         assert thresh <= 1

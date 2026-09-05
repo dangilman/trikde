@@ -1,5 +1,7 @@
+
 import numpy as np
-from trikde.kde import KDE, BoundaryCorrection
+from trikde.kde import (KDE, BoundaryCorrection, effective_sample_size_max,
+                        effective_sample_size_kish)
 from scipy.interpolate import RegularGridInterpolator, interp1d
 import numpy as np
 from multiprocessing.pool import Pool
@@ -412,7 +414,9 @@ class MultivariateNormalPriorHyperCube(object):
         N = 1000000 * len(param_names)
         shape = (N, len(param_names))
         samples = np.empty(shape)
-        weights = 1.
+        # FIX F: was `weights = 1.` (a scalar), which breaks np.histogramdd when
+        # every entry of `means` is None
+        weights = np.ones(N)
         for i, param in enumerate(param_names):
 
             samples[:, i] = np.random.uniform(param_ranges[i][0], param_ranges[i][1], N)
@@ -456,10 +460,13 @@ class CustomPriorHyperCube(object):
         self.renormalization = np.ones_like(self.density)
 
         if renormalize:
+            # FIX G: BoundaryCorrection has no attribute `first_order_correction`
+            # (the method is `first_order`, and the factor is `_renormalization`),
+            # so this branch raised AttributeError.
             boundary_correction = BoundaryCorrection(self.density)
-            self.renormalization = boundary_correction.first_order_correction
+            self.renormalization = boundary_correction._renormalization()
 
-        self.density *= self.renormalization ** -1
+        self.density = self.density * self.renormalization ** -1
 
     @property
     def densities(self):
@@ -474,39 +481,95 @@ class CustomPriorHyperCube(object):
         return self.density
 
 def CIFromDensity(domain, pdf, level=68):
-    cdf = np.cumsum(pdf)
-    cdf = cdf / cdf[-1]
-    u_min = np.min(cdf)
-    u_max = 1.0
-    u = np.linspace(u_min, u_max, 100)
-    cdf_inverse = interp1d(cdf, u)
-    x = np.random.uniform(u_min, u_max, 20000)
-    samples = cdf_inverse(x)
-    return CI(samples, level)
-
-def CI(samples, level=68):
-    import scipy.stats as st
-
-    # example data set
-
-    pk, _xk = np.histogram(samples, bins=100, range=(min(samples), max(samples)))
-    xk = _xk[0:-1] + (_xk[1] - _xk[0]) / 2
-    pk = pk / np.sum(pk)
-    # create custom discrete random variable from data set
-    rv = st.rv_discrete(values=(xk, pk))
-
-    # scipy.stats.rv_discrete has methods for median, confidence interval, etc.
-    #print("median:", rv.median())
-    #print("68% CI:", rv.interval(level/100))
-    return rv.median(), rv.interval(level/100)
-
-def estimate_parameter_ranges(data, CI_level=1, scale_width=1.5):
     """
+    Median and central credible interval of a tabulated 1D pdf.
 
-    :param data:
-    :param CI_level:
-    :param scale_width:
-    :return:
+    FIX B: previously this inverted the CDF by drawing 20000 uniform variates
+    and then re-histogramming them, which made the result stochastic and added
+    unnecessary Monte Carlo noise.  The quantiles are now read off directly.
+
+    :param domain: grid on which the pdf is tabulated
+    :param pdf: (unnormalized) density values
+    :param level: credible level in percent
+    :return: (median, (lower, upper))
+    """
+    domain = np.asarray(domain, dtype=float)
+    pdf = np.asarray(pdf, dtype=float)
+    cdf = np.cumsum(pdf)
+    if cdf[-1] <= 0:
+        raise ValueError('pdf must have positive total mass')
+    cdf = cdf / cdf[-1]
+    # make the cdf strictly increasing so np.interp is well behaved
+    keep = np.concatenate(([True], np.diff(cdf) > 0))
+    alpha = level / 100.
+    q = [0.5, 0.5 * (1 - alpha), 0.5 * (1 + alpha)]
+    median, low, high = np.interp(q, cdf[keep], domain[keep])
+    return median, (low, high)
+
+def CI(samples, level=68, weights=None):
+    """
+    Median and central credible interval of a set of samples.
+
+    FIX A: accepts importance weights.  Without them, the interval describes the
+    sampling distribution rather than the posterior.
+
+    FIX B: the old implementation built a 100-bin histogram, wrapped it in a
+    scipy rv_discrete and called .interval(), which quantised the answer to the
+    histogram grid.  Exact weighted quantiles are used instead.
+
+    :param samples: 1D array of samples
+    :param level: credible level in percent
+    :param weights: optional importance weights, same length as samples
+    :return: (median, (lower, upper))
+    """
+    samples = np.asarray(samples, dtype=float)
+    alpha = level / 100.
+    q = np.array([0.5, 0.5 * (1 - alpha), 0.5 * (1 + alpha)])
+    median, low, high = weighted_quantile(samples, q, weights=weights)
+    return median, (low, high)
+
+
+def weighted_quantile(values, quantiles, weights=None):
+    """
+    Quantiles of a weighted sample.
+
+    :param values: 1D array
+    :param quantiles: scalar or array of quantiles in [0, 1]
+    :param weights: optional weights; uniform if None
+    :return: array of quantile values
+    """
+    values = np.asarray(values, dtype=float)
+    quantiles = np.atleast_1d(np.asarray(quantiles, dtype=float))
+    if np.any(quantiles < 0) or np.any(quantiles > 1):
+        raise ValueError('quantiles must lie in [0, 1]')
+    if weights is None:
+        weights = np.ones_like(values)
+    else:
+        weights = np.asarray(weights, dtype=float)
+        if weights.shape != values.shape:
+            raise ValueError('weights and values must have the same shape')
+    order = np.argsort(values)
+    v, w = values[order], weights[order]
+    if np.sum(w) <= 0:
+        raise ValueError('weights must have positive sum')
+    # midpoint convention: matches np.percentile for uniform weights
+    cw = (np.cumsum(w) - 0.5 * w) / np.sum(w)
+    return np.interp(quantiles, cw, v)
+
+def estimate_parameter_ranges(data, CI_level=1, scale_width=1.5, weights=None):
+    """
+    Estimate a sensible plotting/binning range per parameter.
+
+    FIX A: `weights` is now honoured.  With importance-weighted samples the
+    unweighted interval describes the proposal distribution, so for a likelihood
+    much narrower than the proposal the returned ranges were far too wide and
+    the posterior occupied only a handful of the nbins bins.
+
+    :param data: array of shape (n_samples, n_dim)
+    :param CI_level: 1, 2 or 3 for the 68/95/99 percent interval
+    :param scale_width: multiplier applied to the half-widths
+    :param weights: optional importance weights
+    :return: list of [min, max] per parameter
     """
     param_ranges = []
     if CI_level == 1:
@@ -519,7 +582,7 @@ def estimate_parameter_ranges(data, CI_level=1, scale_width=1.5):
         raise ValueError('samples_width_scale must be 1, 2, or 3 when estimating parameter ranges; numbers '
                          'correspond to 68%, 95%, and 99% CI, respectively')
     for i in range(data.shape[1]):
-        med, interval = CI(data[:, i], level)
+        med, interval = CI(data[:, i], level, weights=weights)
         step_low = med - interval[0]
         step_high = interval[1] - med
         new_interval = [med - scale_width*step_low, med + scale_width*step_high]
@@ -533,6 +596,7 @@ class DensitySamples(object):
     def __init__(self, data, param_names, weights, param_ranges=None, bandwidth_scale=1.0,
                  nbins=12, use_kde='GAUSSIAN', samples_width_scale=3, density=None,
                  nbins_eval=None, resampling=True, n_resample=1000000, sharing_interp=False,
+                 weighted_covariance=True, ess_definition='max',
                  boundary_order=1, force_bandwidth=None, second_order_correction_floor=1e-10):
 
         """
@@ -574,25 +638,32 @@ class DensitySamples(object):
                                 'size (n_observations, n_dimensions)')
 
             if use_kde == 'GAUSSIAN':
-                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth)
+                # FIX H: forward the weighted-covariance and ESS options
+                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth,
+                                use_cov=True, weighted_covariance=weighted_covariance,
+                                ess_definition=ess_definition)
             elif use_kde == 'GAUSSIAN_NO_COV':
-                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth, use_cov=False)
+                estimator = KDE(bandwidth_scale, nbins, boundary_order, force_bandwidth,
+                                use_cov=False, weighted_covariance=weighted_covariance,
+                                ess_definition=ess_definition)
             elif use_kde == 'LINEAR':
-                if nbins_eval is None:
-                    nbins_eval = nbins
-                estimator = LinearKDE(nbins,
-                                      nbins_eval,
-                                      resampling=resampling,
-                                      n_resample=n_resample,
-                                      sharing_interp=sharing_interp)
+                # FIX E: `LinearKDE` is not defined anywhere in the package, so
+                # this branch raised NameError.  Fail loudly and clearly instead.
+                raise NotImplementedError(
+                    "use_kde='LINEAR' is not implemented: trikde.kde does not define "
+                    "LinearKDE. Use 'GAUSSIAN' or 'GAUSSIAN_NO_COV'.")
             elif use_kde is False or use_kde is None:
                 # we still use the NDHistogram
-                estimator = KDE(bandwidth_scale, nbins)
+                estimator = KDE(bandwidth_scale, nbins,
+                                weighted_covariance=weighted_covariance,
+                                ess_definition=ess_definition)
             else:
                 raise ValueError('kde_type must be GAUSSIAN, GAUSSIAN_NO_COV, or LINEAR')
 
             if param_ranges is None:
-                self.param_ranges = estimate_parameter_ranges(data, samples_width_scale)
+                # FIX A: weights must be used, otherwise the range reflects the proposal
+                self.param_ranges = estimate_parameter_ranges(data, samples_width_scale,
+                                                              weights=weights)
             else:
                 self.param_ranges = param_ranges
             self.param_names = param_names
@@ -607,7 +678,8 @@ class DensitySamples(object):
                 #self.density = dens.T
                 self.density=dens
                 self._kde_bandwidth = None
-        self._weights = weights
+        self._weights = None if weights is None else np.asarray(weights, dtype=float)
+        self._n_samples = None if data is None else np.shape(data)[0]
         self.density /= np.max(self.density)
 
     @property
@@ -621,11 +693,33 @@ class DensitySamples(object):
     @property
     def effective_sample_size(self):
         """
-        Returns the effective sample size, defined as the num of the weights
-        :return:
+        Effective sample size, defined as sum(w / max(w)).
+
+        This is trikde's historical definition.  It is always <= Kish's ESS, so
+        it is conservative, but it is set by a single order statistic (max(w))
+        and so is noisy: one draw landing at unusually high likelihood shrinks
+        it.  See `effective_sample_size_kish` for the standard alternative.
+
+        FIX D: returns the raw sample count for unweighted data instead of
+        raising on `self._weights is None`.
         """
-        weights_normalized = self._weights / np.max(self._weights)
-        return np.sum(weights_normalized)
+        if self._weights is None:
+            return float(self._n_samples) if self._n_samples is not None else np.nan
+        return effective_sample_size_max(self._weights)
+
+    @property
+    def effective_sample_size_kish(self):
+        """
+        Kish's effective sample size, (sum w)^2 / sum(w^2).
+
+        Equals the raw count for uniform weights.  Because the Silverman
+        bandwidth scales as ESS^(-1/(d+4)), the choice between this and
+        `effective_sample_size` changes the bandwidth only weakly -- a factor of
+        4 in ESS is ~18 percent in h at d=5.
+        """
+        if self._weights is None:
+            return float(self._n_samples) if self._n_samples is not None else np.nan
+        return effective_sample_size_kish(self._weights)
 
     def __add__(self, other):
         for name_self, name_other in zip(self.param_names, other.param_names):
@@ -651,17 +745,27 @@ class DensitySamples(object):
     def projection_1D(self, pname):
         """
         Returns the 1D marginal pdf of the parameter 'pname'
+
+        FIX C: `self.density` is stored in parameter order (axis i <-> param i),
+        but the summed axes were computed as len(param_names) - (i + 1), i.e.
+        reversed.  In 5D this returned the marginal of param 4 when asked for
+        param 0.  (IndependentLikelihoods.projection_1D applies the same
+        reversed indices to `transpose_density` and is therefore correct; it is
+        left unchanged.)
+
+        Compatibility: DensitySamples.projection_1D / projection_2D now return
+        exactly what IndependentLikelihoods([this]).projection_1D /
+        projection_2D return, so the two classes are interchangeable wherever
+        TrianglePlot duck-types them.  This is asserted in the test suite.
+
         :param pname: parameter name
         :return: 1D pdf
         """
-        sum_inds = []
         if pname not in self.param_names:
             raise Exception('no param named ' + pname)
-        for i, name in enumerate(self.param_names):
-            if pname != name:
-                sum_inds.append(len(self.param_names) - (i + 1))
-        projection = np.sum(self.density, tuple(sum_inds))
-        return projection
+        keep = self.param_names.index(pname)
+        sum_inds = tuple(i for i in range(len(self.param_names)) if i != keep)
+        return np.sum(self.density, sum_inds)
 
     def projection_2D(self, p1, p2):
         """
@@ -673,19 +777,17 @@ class DensitySamples(object):
 
         if p1 not in self.param_names or p2 not in self.param_names:
             raise Exception(p1 + ' or ' + p2 + ' not in ' + str(self.param_names))
-        sum_inds = []
-        for i, name in enumerate(self.param_names):
-            if p1 != name and p2 != name:
-                sum_inds.append(len(self.param_names) - (i + 1))
-        tpose = False
-        for name in self.param_names:
-            if name == p1:
-                break
-            elif name == p2:
-                tpose = True
-                break
-        projection = np.sum(self.density, tuple(sum_inds))
-        if tpose:
+        # FIX C: see projection_1D. `self.density` has axes in parameter order.
+        i1 = self.param_names.index(p1)
+        i2 = self.param_names.index(p2)
+        sum_inds = tuple(i for i in range(len(self.param_names)) if i not in (i1, i2))
+        projection = np.sum(self.density, sum_inds)
+        # np.sum leaves the surviving axes in increasing index order. Transpose to
+        # [p2, p1] -- i.e. rows = p2, columns = p1 -- which is the convention
+        # IndependentLikelihoods.projection_2D already returns and the one
+        # TrianglePlot relies on: it calls projection_2D(col_param, row_param)
+        # and pairs the result with extent = [col_range, row_range] for imshow.
+        if i2 > i1:
             projection = projection.T
         return projection
 
