@@ -26,6 +26,8 @@ class TrianglePlot(object):
     _color_eval = 0.9
     show_intervals_68 = False
 
+    _color_index_marginal = 1
+
     def __init__(self, independent_likelihoods_list, param_ranges=None, cmap='gist_heat',
                  param_name_transformation=None,
                  ticks_and_labels_settings=None):
@@ -129,6 +131,77 @@ class TrianglePlot(object):
                                           norm=norm, logscale=logscale, vmin=vmin, vmax=vmax)
             ims.append(im)
         return axes, ims
+
+    def make_joint_relative_likelihood(self, p1, p2, color_index=0, cmap=None, norm=None,
+                                       axis_label_font=16, tick_label_font=12,
+                                       xtick_label_rotate=0, fig_size=8, figure=1,
+                                       kwargs_plot_maximum_likelihood=None):
+        """
+        Plot a single joint (2D) panel colored by relative likelihood (density normalized
+        to its own peak value)
+
+        :param p1: parameter name plotted on the x axis
+        :param p2: parameter name plotted on the y axis
+        :param color_index: int; index into self._NDdensity_list selecting which
+            chain/likelihood object to plot.
+        :param cmap: a matplotlib Colormap instance
+        :param norm: a matplotlib Normalize (or BoundaryNorm) instance; if None, imshow
+            falls back to default linear normalization over [0, 1]
+        :param axis_label_font: font size for the x/y axis labels
+        :param tick_label_font: font size for tick labels
+        :param xtick_label_rotate: rotation (degrees) applied to x tick labels
+        :param fig_size: figure size passed to self._init
+        :param figure: matplotlib figure number to draw into (passed to plt.figure)
+        :param kwargs_plot_maximum_likelihood: kwargs for plotting the point that marks
+            the maximum likelihood; if None, the point is not plotted
+        :return: (ax, im)
+            ax: the Axes object containing the joint panel
+            im: the AxesImage artist, for use as the mappable argument to plt.colorbar
+        """
+        self.fig = plt.figure(figure)
+        self._init(fig_size)
+        ax = plt.subplot(111)
+
+        if cmap is None:
+            cmap = self.cmap_call
+
+        density = self._load_projection_2D(p1, p2, color_index)
+        rel_density = density / np.max(density)
+
+        extent, aspect = self._extent_aspect([p1, p2])
+        pmin1, pmax1 = extent[0], extent[1]
+        pmin2, pmax2 = extent[2], extent[3]
+
+        im = ax.imshow(rel_density, extent=extent, aspect=aspect,
+                       origin='lower', cmap=cmap, norm=norm)
+        if kwargs_plot_maximum_likelihood is not None:
+            ny, nx = rel_density.shape
+            iy, ix = np.unravel_index(np.argmax(rel_density), rel_density.shape)
+            xmin, xmax, ymin, ymax = extent
+            x_max_likelihood = xmin + (ix + 0.5) * (xmax - xmin) / nx
+            y_max_likelihood = ymin + (iy + 0.5) * (ymax - ymin) / ny
+            ax.scatter(x_max_likelihood, y_max_likelihood, **kwargs_plot_maximum_likelihood)
+
+        ax.set_xlim(pmin1, pmax1)
+        ax.set_ylim(pmin2, pmax2)
+
+        xtick_locs, xtick_labels, xlabel = self.ticks_and_labels(p1, axis='x')
+        ytick_locs, ytick_labels, ylabel = self.ticks_and_labels(p2, axis='y')
+
+        ax.set_xticks(xtick_locs)
+        ax.set_xticklabels(xtick_labels, fontsize=tick_label_font, rotation=xtick_label_rotate)
+        ax.set_xlabel(xlabel, fontsize=axis_label_font)
+
+        ax.set_yticks(ytick_locs)
+        ax.set_yticklabels(ytick_labels, fontsize=tick_label_font)
+        ax.set_ylabel(ylabel, fontsize=axis_label_font)
+
+        plt.subplots_adjust(left=self.spacing[0] * self.spacing_scale,
+                            bottom=self.spacing[1] * self.spacing_scale,
+                            right=1 - self.spacing[2] * self.spacing_scale,
+                            top=1 - self.spacing[3] * self.spacing_scale)
+
+        return ax, im
 
     def make_triplot_relative_likelihood(self, color_index=0, cmap=None, norm=None,
                                          axis_label_font=16, tick_label_font=12,
@@ -716,13 +789,13 @@ class TrianglePlot(object):
                         x1, x2 = bar_centers[i] - bar_width * .5, bar_centers[i] + bar_width * .5
 
                         if filled_contours:
-                            axes[plot_index].plot([x1, x2], [y, y], color=contour_colors[color_index][1],
+                            axes[plot_index].plot([x1, x2], [y, y], color=contour_colors[color_index][self._color_index_marginal],
                                                   alpha=0.9)
-                            axes[plot_index].fill_between([x1, x2], y, color=contour_colors[color_index][1],
+                            axes[plot_index].fill_between([x1, x2], y, color=contour_colors[color_index][self._color_index_marginal],
                                                           alpha=contour_alpha)
-                            axes[plot_index].plot([x1, x1], [0, y], color=contour_colors[color_index][1],
+                            axes[plot_index].plot([x1, x1], [0, y], color=contour_colors[color_index][self._color_index_marginal],
                                                   alpha=0.9)
-                            axes[plot_index].plot([x2, x2], [0, y], color=contour_colors[color_index][1],
+                            axes[plot_index].plot([x2, x2], [0, y], color=contour_colors[color_index][self._color_index_marginal],
                                                   alpha=0.9)
                         else:
                             if self._marginal_col is None:
@@ -905,28 +978,46 @@ class TrianglePlot(object):
         return bar_centers, bar_width, bar_heights
 
     def _contours(self, x, y, grid, ax, linewidths=4, filled_contours=True, contour_colors='',
-                  contour_alpha=1., extent=None, levels=[0.05, 0.32, 1]):
+                  contour_alpha=1., extent=None, levels=None, taper_linewidths=True):
 
-        levels = np.array(levels) * np.max(grid)
+        if levels is None:
+            levels = [0.05, 0.32, 1]
+
+        levels = np.sort(np.array(levels)) * np.max(grid)
+        n_bands = len(levels) - 1  # 2 by default, 3 maximum
         X, Y = np.meshgrid(x, y)
+
+        if not 1 <= n_bands <= 3:
+            raise ValueError('levels must contain 2-4 entries (1-3 filled bands), got %i' % len(levels))
+        if filled_contours and len(contour_colors) < n_bands:
+            raise ValueError('need at least %i colors for %i contour bands' % (n_bands, n_bands))
 
         if filled_contours:
 
-            ax.contour(X, Y, grid, levels, extent=extent,
-                       colors=contour_colors, linewidths=linewidths, zorder=1, linestyles=['dashed', 'solid'])
+            styles = ['solid', 'dashed', 'dotted'][:n_bands]
+            linestyles = styles[::-1] + ['solid']
 
-            ax.contourf(X, Y, grid, [levels[0], levels[1]], colors=[contour_colors[0], contour_colors[1]],
-                        alpha=contour_alpha * 0.5, zorder=1,
-                        extent=extent)
+            if taper_linewidths:
+                scales = [1., 0.8, 0.6][:n_bands]
+                lws = [linewidths * s for s in scales[::-1]] + [linewidths]
+            else:
+                lws = linewidths
 
-            ax.contourf(X, Y, grid, [levels[1], levels[2]], colors=[contour_colors[1], contour_colors[2]],
-                        alpha=contour_alpha, zorder=1,
-                        extent=extent)
+            line_colors = [contour_colors[min(i, len(contour_colors) - 1)]
+                           for i in range(len(levels))]
+
+            ax.contour(X, Y, grid, levels, extent=extent, colors=line_colors,
+                       linewidths=lws, zorder=1, linestyles=linestyles)
+
+            for i in range(n_bands):
+                ax.contourf(X, Y, grid, [levels[i], levels[i + 1]],
+                            colors=[contour_colors[i]],
+                            alpha=contour_alpha * (i + 1) / n_bands,
+                            zorder=1, extent=extent)
 
         else:
             ax.contour(X, Y, grid, extent=extent, colors=contour_colors, zorder=1,
-                       levels=levels,
-                       linewidths=linewidths)
+                       levels=levels, linewidths=linewidths)
 
     def ticks_and_labels(self, pname, axis=None):
         """
@@ -1073,7 +1164,8 @@ def make_colorbar(triplot, axes, images, ratios,
                   stretch_y=1.0,
                   shift_x=1.0,
                   width_scale=0.15,
-                  labelpad=10):
+                  labelpad=10,
+                  arrows=True):
     """
     Build a colorbar spanning two panels' vertical extent, with bin boundaries
     and tick labels derived directly from a list of posterior odds ratios.
@@ -1132,7 +1224,33 @@ def make_colorbar(triplot, axes, images, ratios,
     cbar.set_ticklabels(tick_labels)
     cbar.ax.tick_params(labelsize=tick_fontsize)
 
+    if arrows:
+        upper_label, lower_label = arrow_labels
+        arrow_style = dict(arrowstyle='-|>', mutation_scale=14,
+                           linewidth=arrow_linewidth, color=arrow_color,
+                           shrinkA=0, shrinkB=0)
+        # up arrow: from just above the midpoint to the top of the bar
+        cbar.ax.annotate('', xy=(arrow_x, 1.0), xytext=(arrow_x, 0.5 + arrow_gap),
+                         xycoords='axes fraction', textcoords='axes fraction',
+                         arrowprops=arrow_style, annotation_clip=False)
+        # down arrow: from just below the midpoint to the bottom of the bar
+        cbar.ax.annotate('', xy=(arrow_x, 0.0), xytext=(arrow_x, 0.5 - arrow_gap),
+                         xycoords='axes fraction', textcoords='axes fraction',
+                         arrowprops=arrow_style, annotation_clip=False)
+
+        cbar.ax.text(arrow_text_x, 0.5 + arrow_gap + (0.5 - arrow_gap) * 0.5,
+                     upper_label, transform=cbar.ax.transAxes,
+                     rotation=90, rotation_mode='anchor',
+                     ha='center', va='center', clip_on=False,
+                     fontsize=arrow_fontsize, color=arrow_color)
+        cbar.ax.text(arrow_text_x, 0.5 - arrow_gap - (0.5 - arrow_gap) * 0.5,
+                     lower_label, transform=cbar.ax.transAxes,
+                     rotation=90, rotation_mode='anchor',
+                     ha='center', va='center', clip_on=False,
+                     fontsize=arrow_fontsize, color=arrow_color)
+
     return cbar
+
 
 def compute_confidence_intervals(sample, num_sigma, thresh=None):
     """

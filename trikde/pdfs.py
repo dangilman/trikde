@@ -237,6 +237,42 @@ class IndependentLikelihoods(object):
             return out
 
     @classmethod
+    def from_npz(cls, filename, param_names, param_ranges, key='log_density'):
+        """
+        Create the class from an npz file containing a raveled log-density.
+
+        :param filename: path to the .npz file
+        :param param_names: list of parameter names, ordered to match the density axes
+        :param param_ranges: list of [min, max] pairs, one per parameter
+        :param key: name of the array in the npz holding the log density
+        :return: instance of the class
+        """
+        with np.load(filename) as f:
+            log_density = np.asarray(f[key], dtype=np.float64)
+            if 'shape' in f.files:
+                shape = tuple(int(s) for s in f['shape'])
+            else:
+                nbins = int(round(log_density.size ** (1.0 / len(param_names))))
+                shape = (nbins,) * len(param_names)
+            stored_names = [str(s) for s in f['param_names']] if 'param_names' in f.files else None
+
+        if stored_names is not None and stored_names != list(param_names):
+            raise ValueError('param_names stored in ' + filename + ' are ' +
+                             str(stored_names) + ', but ' + str(list(param_names)) +
+                             ' was passed in; axis ordering would be wrong.')
+
+        if log_density.size != int(np.prod(shape)):
+            raise ValueError('array of size ' + str(log_density.size) +
+                             ' cannot be reshaped to ' + str(shape))
+
+        log_density = log_density.reshape(shape)
+        density = np.exp(log_density - np.max(log_density))
+
+        pdf = DensitySamples.from_histogram(density, param_names, param_ranges)
+        return cls([pdf])
+
+
+    @classmethod
     def from_hdf5(cls, filename, param_names, param_ranges):
         """
         Create the class from an HDF5 file that contains a list "densities", which contains the likelihood in ndim dimensions

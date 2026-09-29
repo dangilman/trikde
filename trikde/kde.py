@@ -143,37 +143,32 @@ class KDE(PointInterp):
         return (n * (d + 2) / 4.) ** (-1. / (d + 4))
 
     @staticmethod
-    def _gaussian_kernel(inverse_cov_matrix, coords_centered, dimension, n_reshape):
-        """
-        Multivariate Gaussian evaluated on the (already centred) coordinate array.
-
-        FIX 4: vectorised.  The previous list comprehension performed nbins**d
-        Python-level np.dot calls.
-        """
+    def _gaussian_kernel(inverse_cov_matrix, coords_centered, kernel_shape):
         coords_centered = np.atleast_2d(coords_centered)
         inverse_cov_matrix = np.atleast_2d(inverse_cov_matrix)
         quad = np.einsum('ij,jk,ik->i', coords_centered, inverse_cov_matrix, coords_centered)
-        z = np.exp(-0.5 * quad)
-        return np.reshape(z, tuple([n_reshape] * dimension))
+        return np.reshape(np.exp(-0.5 * quad), kernel_shape)
 
-    def _kernel_offsets(self, ranges, nbins, dimension):
+    def _kernel_offsets(self, ranges, nbins, dimension, covariance=None, n_sigma=4.0):
         """
-        Coordinate offsets of the kernel grid, in the same units as the data.
-
-        FIX 3: built from integer bin offsets about index (nbins - 1) // 2, which
-        is the origin scipy's fftconvolve(..., mode='same') assumes, so the kernel
-        is exactly centred for both even and odd nbins, and its spacing matches
-        the histogram bin width.  With the old code an even nbins (the default is
-        12) shifted the whole density by one bin.
+        Coordinate offsets of the kernel grid, truncated at n_sigma.
+        Returns (offsets, kernel_shape). Kernel spans only where the Gaussian
+        is non-negligible instead of the full nbins per axis, which avoids
+        fftconvolve padding to (2*nbins-1)**dimension.
         """
-        idx = np.arange(nbins) - (nbins - 1) // 2
-        axes = []
-        for i in range(dimension):
-            dx = (ranges[i][-1] - ranges[i][0]) / float(nbins)
-            axes.append(idx * dx)
-        # FIX 1: indexing='ij' so array axis i corresponds to parameter i
+        dx = np.array([(ranges[i][-1] - ranges[i][0]) / float(nbins)
+                       for i in range(dimension)])
+        half_max = (nbins - 1) // 2
+        if covariance is None:
+            hw = np.full(dimension, half_max, dtype=int)
+        else:
+            sig = np.sqrt(np.diag(np.atleast_2d(covariance)))
+            hw = np.ceil(n_sigma * sig / dx).astype(int)
+            hw = np.clip(hw, 1, half_max)
+        axes = [np.arange(-hw[i], hw[i] + 1) * dx[i] for i in range(dimension)]
         grids = np.meshgrid(*axes, indexing='ij')
-        return np.vstack([g.ravel() for g in grids]).T
+        kernel_shape = tuple(2 * int(hw[i]) + 1 for i in range(dimension))
+        return np.vstack([g.ravel() for g in grids]).T, kernel_shape
 
     def __call__(self, data, ranges, weights):
         """
@@ -232,12 +227,13 @@ class KDE(PointInterp):
             c_inv = np.atleast_2d(1. / covariance)
 
         # ---- convolve ---------------------------------------------------------
-        offsets = self._kernel_offsets(ranges, nbins, dimension)
-        gaussian_kernel = self._gaussian_kernel(c_inv, offsets, dimension, nbins)
+        offsets, kernel_shape = self._kernel_offsets(ranges, nbins, dimension, covariance)
+        gaussian_kernel = self._gaussian_kernel(c_inv, offsets, kernel_shape)
 
         density = fftconvolve(H, gaussian_kernel, mode='same')
 
-        bc = BoundaryCorrection(gaussian_kernel, self._second_order_correction_floor)
+        bc = BoundaryCorrection(gaussian_kernel, H.shape, self._second_order_correction_floor)
+
         if self._boundary_order == 0:
             pass
         elif self._boundary_order == 1:
@@ -253,21 +249,13 @@ class KDE(PointInterp):
 
 class BoundaryCorrection(object):
 
-    def __init__(self, pdf, tol_second_order=1e-10):
-        """
-        :param pdf: the (unnormalized) kernel array
-        :param tol_second_order: threshold for masking of the second order correction
-        """
+    def __init__(self, pdf, domain_shape, tol_second_order=1e-10):
         self._pdf = pdf
         self._tol_second_order = tol_second_order
-        self._boundary_kernel = np.ones(np.shape(pdf))
+        self._boundary_kernel = np.ones(domain_shape)
 
     def _renormalization(self):
-        """
-        Fraction of kernel mass inside the parameter space at each point,
-        normalized so that the interior equals 1.
-        """
-        boundary_normalization = fftconvolve(self._pdf, self._boundary_kernel, mode='same')
+        boundary_normalization = fftconvolve(self._boundary_kernel, self._pdf, mode='same')
         total_mass = np.sum(self._pdf)
         return boundary_normalization / total_mass
 
