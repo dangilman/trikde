@@ -3,7 +3,6 @@ from scipy.signal import fftconvolve
 from scipy.interpolate import RegularGridInterpolator
 from scipy import ndimage
 
-
 def effective_sample_size_max(weights):
     """
     ESS defined as sum(w / max(w)).  This is trikde's historical definition.
@@ -227,18 +226,31 @@ class KDE(PointInterp):
             c_inv = np.atleast_2d(1. / covariance)
 
         # ---- convolve ---------------------------------------------------------
-        offsets, kernel_shape = self._kernel_offsets(ranges, nbins, dimension, covariance)
-        gaussian_kernel = self._gaussian_kernel(c_inv, offsets, kernel_shape)
+        dx = np.array([(ranges[i][-1] - ranges[i][0]) / float(nbins)
+                       for i in range(dimension)])
 
-        density = fftconvolve(H, gaussian_kernel, mode='same')
-
-        bc = BoundaryCorrection(gaussian_kernel, H.shape, self._second_order_correction_floor)
+        if self._use_cov is False:
+            # separable path: six 1D passes, no 6D kernel, no FFT padding
+            sigma_bins = np.sqrt(np.diag(covariance)) / dx
+            density = ndimage.gaussian_filter(H, sigma=sigma_bins,
+                                              mode='constant', cval=0.0,
+                                              truncate=4.0)
+            bc = BoundaryCorrection(None, H.shape, self._second_order_correction_floor,
+                                    sigma_bins=sigma_bins)
+            gaussian_kernel = None
+        else:
+            offsets, kernel_shape = self._kernel_offsets(ranges, nbins, dimension, covariance)
+            gaussian_kernel = self._gaussian_kernel(c_inv, offsets, kernel_shape)
+            density = fftconvolve(H, gaussian_kernel, mode='same')
+            bc = BoundaryCorrection(gaussian_kernel, H.shape, self._second_order_correction_floor)
 
         if self._boundary_order == 0:
             pass
         elif self._boundary_order == 1:
             density = bc.first_order(density)
         elif self._boundary_order == 2:
+            if gaussian_kernel is None:
+                raise NotImplementedError('boundary_order=2 requires use_cov=True')
             density = bc.second_order(density, H, gaussian_kernel)
         else:
             raise ValueError('boundary_order must be 0, 1 or 2')
@@ -249,15 +261,21 @@ class KDE(PointInterp):
 
 class BoundaryCorrection(object):
 
-    def __init__(self, pdf, domain_shape, tol_second_order=1e-10):
+    def __init__(self, pdf, domain_shape, tol_second_order=1e-10, sigma_bins=None):
+        
         self._pdf = pdf
         self._tol_second_order = tol_second_order
-        self._boundary_kernel = np.ones(domain_shape)
+        self._domain_shape = domain_shape
+        self._sigma_bins = sigma_bins
+        self._boundary_kernel = None if sigma_bins is not None else np.ones(domain_shape)
 
     def _renormalization(self):
+        if self._sigma_bins is not None:
+            ones = np.ones(self._domain_shape)
+            return ndimage.gaussian_filter(ones, sigma=self._sigma_bins,
+                                           mode='constant', cval=0.0, truncate=4.0)
         boundary_normalization = fftconvolve(self._boundary_kernel, self._pdf, mode='same')
-        total_mass = np.sum(self._pdf)
-        return boundary_normalization / total_mass
+        return boundary_normalization / np.sum(self._pdf)
 
     def first_order(self, density):
         """
